@@ -2,13 +2,13 @@
 
 import { use, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { useAuth } from "../../context/AuthContext"
-import { useRouter } from "next/navigation"  // 👈 IMPORTANTE: esta línea faltaba
+import { useAuth } from "../../context/AuthContext"  // 👈 RUTA CORREGIDA
+import { useRouter } from "next/navigation"
 
 export default function ProjectPage({ params }: any) {
   const { id } = use(params)
-  const { user } = useAuth()  // 👈 Solo necesitamos user aquí, no signOut
-  const router = useRouter()  // 👈 Ahora sí está importado
+  const { user } = useAuth()
+  const router = useRouter()
 
   const [project, setProject] = useState<any>(null)
   const [tracks, setTracks] = useState<any[]>([])
@@ -136,14 +136,12 @@ export default function ProjectPage({ params }: any) {
     }
   }
 
-  // 👈 NUEVA FUNCIÓN: Fork
   async function forkProject() {
     if (!project) return
 
     const newName = prompt("Nombre para el fork:", `${project.name} (fork)`)
     if (!newName) return
 
-    // Crear nuevo proyecto
     const { data: newProject, error } = await supabase
       .from("projects")
       .insert([
@@ -162,7 +160,6 @@ export default function ProjectPage({ params }: any) {
       return
     }
 
-    // Copiar todas las pistas
     for (const track of tracks) {
       await supabase.from("tracks").insert([
         {
@@ -186,7 +183,6 @@ export default function ProjectPage({ params }: any) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1>🎵 {project?.name || "Cargando..."}</h1>
         
-        {/* 👈 BOTÓN FORK */}
         <button
           onClick={forkProject}
           style={{
