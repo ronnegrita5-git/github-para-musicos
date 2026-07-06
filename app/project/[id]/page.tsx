@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { useAuth } from "../../context/AuthContext"  // 👈 RUTA CORREGIDA
+import { useAuth } from "../../context/AuthContext"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 
@@ -42,9 +42,6 @@ export default function ProjectPage({ params }: any) {
       const owner = data.user_id === user.id
       setIsOwner(owner)
       setIsPublic(data.is_public !== false)
-      console.log("👤 Dueño del proyecto:", data.user_id)
-      console.log("👤 Usuario actual:", user.id)
-      console.log("🏷️ Es dueño:", owner)
     }
   }
 
@@ -73,13 +70,6 @@ export default function ProjectPage({ params }: any) {
     const name = prompt("Nombre de la pista 🎵")
     if (!name) return
 
-    console.log("📝 Creando pista:", {
-      name,
-      instrument,
-      project_id: id,
-      user_id: user?.id
-    })
-
     try {
       const { data, error } = await supabase
         .from("tracks")
@@ -99,10 +89,8 @@ export default function ProjectPage({ params }: any) {
         return
       }
 
-      console.log("✅ Pista creada:", data)
       alert("✅ Pista añadida correctamente")
       loadTracks()
-
     } catch (error: any) {
       console.error("❌ Error inesperado:", error)
       alert("Error inesperado: " + (error.message || "Error desconocido"))
@@ -123,7 +111,6 @@ export default function ProjectPage({ params }: any) {
     const fileName = `${id}/${Date.now()}-${file.name}`
 
     try {
-      // 1. Subir a Storage
       const { error: uploadError } = await supabase.storage
         .from("audio")
         .upload(fileName, file, {
@@ -138,15 +125,12 @@ export default function ProjectPage({ params }: any) {
         return
       }
 
-      // 2. Obtener URL pública
       const { data: urlData } = supabase.storage
         .from("audio")
         .getPublicUrl(fileName)
 
       const audioUrl = urlData.publicUrl
-      console.log("✅ Audio subido:", audioUrl)
 
-      // 3. Guardar URL en la base de datos
       const { error: updateError } = await supabase
         .from("tracks")
         .update({ audio_url: audioUrl })
@@ -159,7 +143,6 @@ export default function ProjectPage({ params }: any) {
 
       setUploading(false)
       loadTracks()
-
     } catch (error: any) {
       console.error("❌ Error inesperado:", error)
       alert("Error al subir audio: " + (error.message || "Error desconocido"))
@@ -283,8 +266,7 @@ export default function ProjectPage({ params }: any) {
       }
 
       alert(`✅ Proyecto "${project?.name}" eliminado correctamente`)
-      router.push("/")
-
+      router.push("/dashboard")
     } catch (error: any) {
       alert("Error al eliminar proyecto: " + (error.message || "Error desconocido"))
     }
@@ -292,8 +274,8 @@ export default function ProjectPage({ params }: any) {
 
   async function forkProject() {
     if (!project) {
-      alert("No hay proyecto para hacer fork");
-      return;
+      alert("No hay proyecto para hacer fork")
+      return
     }
 
     const newName = prompt("Nombre para el fork:", `${project.name} (fork)`)
@@ -314,20 +296,20 @@ export default function ProjectPage({ params }: any) {
         .single()
 
       if (projectError) {
-        console.error("Error al crear proyecto:", projectError);
-        alert("Error al crear fork: " + projectError.message);
-        return;
+        console.error("Error al crear proyecto:", projectError)
+        alert("Error al crear fork: " + projectError.message)
+        return
       }
 
       const { data: tracksData, error: tracksError } = await supabase
         .from("tracks")
         .select("*")
-        .eq("project_id", project.id);
+        .eq("project_id", project.id)
 
       if (tracksError) {
-        console.error("Error al obtener pistas:", tracksError);
-        alert("Error al copiar pistas: " + tracksError.message);
-        return;
+        console.error("Error al obtener pistas:", tracksError)
+        alert("Error al copiar pistas: " + tracksError.message)
+        return
       }
 
       if (tracksData && tracksData.length > 0) {
@@ -340,16 +322,15 @@ export default function ProjectPage({ params }: any) {
               audio_url: track.audio_url || null,
               user_id: user?.id,
             },
-          ]);
+          ])
         }
       }
 
-      alert(`✅ Fork creado exitosamente: "${newName}"`);
-      router.push(`/project/${newProject.id}`);
-      
+      alert(`✅ Fork creado exitosamente: "${newName}"`)
+      router.push(`/project/${newProject.id}`)
     } catch (error: any) {
-      console.error("Error en fork:", error);
-      alert("Error al hacer fork: " + (error.message || "Error desconocido"));
+      console.error("Error en fork:", error)
+      alert("Error al hacer fork: " + (error.message || "Error desconocido"))
     }
   }
 
@@ -365,7 +346,7 @@ export default function ProjectPage({ params }: any) {
           marginBottom: 20,
           border: "1px solid #dee2e6",
         }}>
-          <h4 style={{ margin: "0 0 10px 0" }}>⚙️ Panel de control del proyecto</h4>
+          <h4 style={{ margin: "0 0 10px 0" }}>⚙️ Panel de control</h4>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button
               onClick={toggleVisibility}
@@ -405,11 +386,7 @@ export default function ProjectPage({ params }: any) {
       )}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1>🎵 {project?.name || "Cargando..."}
-          {!isPublic && isOwner && <span style={{ fontSize: 14, color: "#888", marginLeft: 10 }}>🔒</span>}
-          {!isOwner && <span style={{ fontSize: 14, color: "#888", marginLeft: 10 }}>👁️</span>}
-        </h1>
-        
+        <h1>🎵 {project?.name || "Cargando..."}</h1>
         <button
           onClick={forkProject}
           style={{
@@ -428,15 +405,13 @@ export default function ProjectPage({ params }: any) {
 
       {!isOwner && (
         <p style={{ color: "#888", fontStyle: "italic" }}>
-          👁️ Estás viendo este proyecto como visitante. Solo el dueño puede añadir o modificar pistas.
+          👁️ Estás viendo este proyecto como visitante.
         </p>
       )}
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
         {isOwner && (
-          <button onClick={addTrack}>
-            + Añadir pista
-          </button>
+          <button onClick={addTrack}>+ Añadir pista</button>
         )}
 
         {isOwner && (
@@ -472,36 +447,6 @@ export default function ProjectPage({ params }: any) {
         >
           {playingAll ? "⏹ Detener todas" : "▶ Reproducir todas"}
         </button>
-
-        <Link href={`/project/${id}/pr/new`}>
-          <button
-            style={{
-              padding: "8px 16px",
-              background: "#fd7e14",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            📥 Nueva PR
-          </button>
-        </Link>
-
-        <Link href={`/project/${id}/pr`}>
-          <button
-            style={{
-              padding: "8px 16px",
-              background: "#6c757d",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-            }}
-          >
-            📋 Ver PRs
-          </button>
-        </Link>
       </div>
 
       <div style={{ marginTop: 20 }}>
@@ -527,7 +472,6 @@ export default function ProjectPage({ params }: any) {
                     ({t.instrument || "sin instrumento"})
                   </span>
                 </div>
-
                 {isOwner && (
                   <button
                     onClick={() => deleteTrack(t.id)}
@@ -539,7 +483,6 @@ export default function ProjectPage({ params }: any) {
                       padding: "4px 8px",
                       color: "#dc3545",
                     }}
-                    title="Eliminar pista"
                   >
                     🗑️
                   </button>
@@ -562,7 +505,6 @@ export default function ProjectPage({ params }: any) {
                 ) : (
                   <div>
                     <audio controls src={t.audio_url} />
-
                     <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontSize: 12, color: "#888" }}>🔊</span>
                       <input
