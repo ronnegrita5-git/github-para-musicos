@@ -7,7 +7,7 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
   
-  console.log("🔵 Código:", code ? "Sí" : "No")
+  console.log("🔵 Código recibido:", code ? "Sí" : "No")
 
   if (code) {
     try {
@@ -23,17 +23,7 @@ export async function GET(request: Request) {
       }
       
       console.log("✅ Sesión intercambiada para:", data.user?.email)
-      
-      // 👈 REDIRECCIÓN AL DASHBOARD
-      const response = NextResponse.redirect(new URL('/dashboard', requestUrl.origin))
-      
-      // 👈 AÑADIR COOKIES MANUALMENTE (por si acaso)
-      response.headers.set(
-        'Set-Cookie',
-        'sb-access-token=; Max-Age=0; Path=/; HttpOnly'
-      )
-      
-      return response
+      return NextResponse.redirect(new URL('/dashboard', requestUrl.origin))
       
     } catch (error: any) {
       console.error("❌ Excepción:", error.message)
