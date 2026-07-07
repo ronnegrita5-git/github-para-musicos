@@ -34,13 +34,9 @@ export default function LoginPage() {
   }
 
   async function handleGoogleLogin() {
-    console.log("🔵 Botón de Google clicado")
     try {
-      console.log("🔵 Llamando a signInWithGoogle...")
       await signInWithGoogle()
-      console.log("✅ signInWithGoogle completado")
     } catch (err: any) {
-      console.error("❌ Error:", err)
       setError(err.message || "Error al iniciar sesión con Google")
     }
   }
@@ -79,47 +75,30 @@ export default function LoginPage() {
           onClick={handleGoogleLogin}
           style={{
             width: "100%",
-            padding: "14px 16px",
+            padding: "12px 16px",
             background: "white",
             color: "#333",
             border: "1px solid #ddd",
-            borderRadius: 12,
+            borderRadius: 10,
             cursor: "pointer",
             fontSize: 16,
-            fontWeight: "600",
+            fontWeight: "500",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: 12,
-            transition: "all 0.3s ease",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#f8f9fa"
-            e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)"
-            e.currentTarget.style.transform = "scale(1.01)"
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "white"
-            e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)"
-            e.currentTarget.style.transform = "scale(1)"
+            gap: 10,
+            marginBottom: 20,
           }}
         >
           <img 
             src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" 
             alt="Google" 
-            style={{ width: 24, height: 24 }} 
+            style={{ width: 20, height: 20 }} 
           />
-          <span>Continuar con Google</span>
+          Continuar con Google
         </button>
 
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginTop: 20,
-          marginBottom: 20,
-        }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
           <div style={{ flex: 1, borderBottom: "1px solid rgba(255,255,255,0.2)" }} />
           <span style={{ color: "#888", fontSize: 12 }}>o con email</span>
           <div style={{ flex: 1, borderBottom: "1px solid rgba(255,255,255,0.2)" }} />
