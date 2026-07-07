@@ -1,13 +1,13 @@
 "use client"
 
-import { use, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
-import { useAuth } from "@/app/context/AuthContext"
+import { useAuth } from "../../../context/AuthContext"
 import Link from "next/link"
 
 export default function NewPRPage({ params }: any) {
-  const { id } = use(params)
+  const { id } = params
   const { user } = useAuth()
   const router = useRouter()
   
@@ -25,6 +25,11 @@ export default function NewPRPage({ params }: any) {
     e.preventDefault()
     if (!title.trim()) {
       alert("El título es obligatorio")
+      return
+    }
+    if (!user) {
+      alert("Debes iniciar sesión")
+      router.push("/login")
       return
     }
 
@@ -48,7 +53,7 @@ export default function NewPRPage({ params }: any) {
 
       if (prError) throw prError
 
-      // 2. Subir las pistas si hay
+      // 2. Subir las pistas
       for (const track of tracks) {
         let audioUrl = null
 
@@ -91,7 +96,6 @@ export default function NewPRPage({ params }: any) {
       alert("El nombre de la pista es obligatorio")
       return
     }
-
     setTracks([...tracks, { ...currentTrack }])
     setCurrentTrack({ name: "", instrument: "guitarra", file: null })
   }
@@ -101,16 +105,16 @@ export default function NewPRPage({ params }: any) {
   }
 
   return (
-    <div style={{ padding: 30, fontFamily: "Arial", maxWidth: 700, margin: "0 auto" }}>
-      <Link href={`/project/${id}`} style={{ textDecoration: "none", color: "#2b8a3e" }}>
+    <div style={{ padding: 30, fontFamily: "'Inter', sans-serif", maxWidth: 700, margin: "0 auto" }}>
+      <Link href={`/project/${id}`} style={{ textDecoration: "none", color: "#10b981" }}>
         ← Volver al proyecto
       </Link>
 
-      <h1>📥 Nuevo Pull Request</h1>
+      <h1 style={{ color: "white" }}>📥 Nuevo Pull Request</h1>
 
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: 15 }}>
-          <label style={{ display: "block", fontWeight: "bold", marginBottom: 5 }}>
+          <label style={{ display: "block", fontWeight: "bold", marginBottom: 5, color: "#e5e5e5" }}>
             Título *
           </label>
           <input
@@ -122,14 +126,16 @@ export default function NewPRPage({ params }: any) {
               width: "100%",
               padding: 10,
               borderRadius: 8,
-              border: "1px solid #ccc",
+              border: "1px solid rgba(16, 185, 129, 0.2)",
+              background: "rgba(255,255,255,0.05)",
+              color: "white",
               fontSize: 16,
             }}
           />
         </div>
 
         <div style={{ marginBottom: 15 }}>
-          <label style={{ display: "block", fontWeight: "bold", marginBottom: 5 }}>
+          <label style={{ display: "block", fontWeight: "bold", marginBottom: 5, color: "#e5e5e5" }}>
             Descripción
           </label>
           <textarea
@@ -141,14 +147,17 @@ export default function NewPRPage({ params }: any) {
               width: "100%",
               padding: 10,
               borderRadius: 8,
-              border: "1px solid #ccc",
+              border: "1px solid rgba(16, 185, 129, 0.2)",
+              background: "rgba(255,255,255,0.05)",
+              color: "white",
               fontSize: 16,
+              resize: "vertical",
             }}
           />
         </div>
 
-        <div style={{ marginBottom: 20, padding: 15, border: "1px solid #e0e0e0", borderRadius: 8 }}>
-          <h4>🎵 Añadir pistas</h4>
+        <div style={{ marginBottom: 20, padding: 15, border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: 8 }}>
+          <h4 style={{ color: "#e5e5e5" }}>🎵 Pistas a añadir</h4>
           
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <input
@@ -159,7 +168,9 @@ export default function NewPRPage({ params }: any) {
               style={{
                 padding: 8,
                 borderRadius: 8,
-                border: "1px solid #ccc",
+                border: "1px solid rgba(16, 185, 129, 0.2)",
+                background: "rgba(255,255,255,0.05)",
+                color: "white",
                 flex: 1,
                 minWidth: 150,
               }}
@@ -170,7 +181,9 @@ export default function NewPRPage({ params }: any) {
               style={{
                 padding: 8,
                 borderRadius: 8,
-                border: "1px solid #ccc",
+                border: "1px solid rgba(16, 185, 129, 0.2)",
+                background: "rgba(255,255,255,0.05)",
+                color: "white",
               }}
             >
               <option value="guitarra">🎸 Guitarra</option>
@@ -187,14 +200,14 @@ export default function NewPRPage({ params }: any) {
                 const file = e.target.files?.[0] || null
                 setCurrentTrack({ ...currentTrack, file })
               }}
-              style={{ fontSize: 14 }}
+              style={{ fontSize: 14, color: "white" }}
             />
             <button
               type="button"
               onClick={addTrackToList}
               style={{
                 padding: "8px 16px",
-                background: "#0d6efd",
+                background: "linear-gradient(135deg, #10b981, #059669)",
                 color: "white",
                 border: "none",
                 borderRadius: 8,
@@ -207,9 +220,9 @@ export default function NewPRPage({ params }: any) {
 
           {tracks.length > 0 && (
             <div style={{ marginTop: 10 }}>
-              <p style={{ margin: 0, fontWeight: "bold", fontSize: 14 }}>Pistas añadidas:</p>
+              <p style={{ margin: 0, fontWeight: "bold", fontSize: 14, color: "#e5e5e5" }}>Pistas añadidas:</p>
               {tracks.map((t, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0" }}>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", color: "#e5e5e5" }}>
                   <span>🎧 {t.name} ({t.instrument}) {t.file ? "📁" : ""}</span>
                   <button
                     type="button"
@@ -217,7 +230,7 @@ export default function NewPRPage({ params }: any) {
                     style={{
                       background: "none",
                       border: "none",
-                      color: "#dc3545",
+                      color: "#ef4444",
                       cursor: "pointer",
                     }}
                   >
@@ -234,7 +247,7 @@ export default function NewPRPage({ params }: any) {
           disabled={loading}
           style={{
             padding: "12px 24px",
-            background: "#2b8a3e",
+            background: loading ? "#065f46" : "linear-gradient(135deg, #10b981, #059669)",
             color: "white",
             border: "none",
             borderRadius: 8,
