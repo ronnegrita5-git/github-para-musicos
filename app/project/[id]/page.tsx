@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "../../context/AuthContext"
 import { useRouter } from "next/navigation"
@@ -12,7 +12,7 @@ import WebRecorder from "../../components/WebRecorder"
 import MultiUpload from "../../components/MultiUpload"
 
 export default function ProjectPage({ params }: any) {
-  const { id } = params
+  const { id } = React.use(params)
   const { user } = useAuth()
   const router = useRouter()
 

@@ -1,13 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import React, { useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/app/context/AuthContext"
 import Link from "next/link"
 
 export default function NewPRPage({ params }: any) {
-  const { id } = params
+  const { id } = React.use(params)
   const { user } = useAuth()
   const router = useRouter()
   
@@ -36,7 +36,6 @@ export default function NewPRPage({ params }: any) {
     setLoading(true)
 
     try {
-      // 1. Crear el PR
       const { data: pr, error: prError } = await supabase
         .from("pull_requests")
         .insert([
@@ -53,7 +52,6 @@ export default function NewPRPage({ params }: any) {
 
       if (prError) throw prError
 
-      // 2. Subir las pistas
       for (const track of tracks) {
         let audioUrl = null
 

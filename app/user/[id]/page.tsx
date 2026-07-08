@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import Link from "next/link"
 import { useAuth } from "@/app/context/AuthContext"
@@ -8,7 +8,7 @@ import Breadcrumbs from "../../components/Breadcrumbs"
 import FollowButton from "../../components/FollowButton"
 
 export default function UserProfilePage({ params }: any) {
-  const { id } = params
+  const { id } = React.use(params)
   const { user } = useAuth()
   const [profile, setProfile] = useState<any>(null)
   const [projects, setProjects] = useState<any[]>([])
