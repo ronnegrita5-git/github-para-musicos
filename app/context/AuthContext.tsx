@@ -109,11 +109,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/dashboard")
   }
 
+  // 👈 REEMPLAZA CON EL CLIENT ID CORRECTO
   const signInWithGoogle = async () => {
-    console.log("🔵 Redirigiendo a Google...")
-    window.location.href = 
+    const clientId = 'CLIENT_ID_DE_GOOGLE_CLOUD'  // 👈 PON AQUÍ EL ID QUE COPIASTE
+    console.log("🔵 Redirigiendo a Google con Client ID:", clientId)
+
+    window.location.href =
       'https://accounts.google.com/o/oauth2/v2/auth?' +
-      'client_id=49946247144-9jildu9vo07drmkjmu2uklnvhae7vhhf.apps.googleusercontent.com&' +
+      `client_id=${clientId}&` +
       'redirect_uri=https://github-para-musicos.vercel.app/auth/callback&' +
       'response_type=code&' +
       'scope=email%20profile&' +
