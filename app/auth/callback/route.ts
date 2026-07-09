@@ -23,6 +23,7 @@ export async function GET(request: Request) {
       }
       
       console.log("✅ Sesión intercambiada para:", data.user?.email)
+      // 👈 REDIRIGIR AL DASHBOARD
       return NextResponse.redirect(new URL('/dashboard', requestUrl.origin))
       
     } catch (error: any) {
