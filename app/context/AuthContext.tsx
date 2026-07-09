@@ -109,19 +109,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/dashboard")
   }
 
-  // 👈 UNIFICADO: TODOS USAN LA MISMA URL
   const signInWithGoogle = async () => {
-    console.log("🔵 Redirigiendo a Google con Supabase...")
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: 'https://faycvxctpilpnmeramcy.supabase.co/auth/v1/callback'
-      }
-    })
-    if (error) {
-      console.error("❌ Error en Google:", error)
-      throw error
-    }
+    console.log("🔵 Redirigiendo a Google...")
+    window.location.href = 
+      'https://accounts.google.com/o/oauth2/v2/auth?' +
+      'client_id=49946247144-9jildu9vo07drmkjmu2uklnvhae7vhhf.apps.googleusercontent.com&' +
+      'redirect_uri=https://github-para-musicos.vercel.app/auth/callback&' +
+      'response_type=code&' +
+      'scope=email%20profile&' +
+      'access_type=offline'
   }
 
   const signOut = async () => {
