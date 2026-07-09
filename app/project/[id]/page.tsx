@@ -12,7 +12,7 @@ import WebRecorder from "../../components/WebRecorder"
 import MultiUpload from "../../components/MultiUpload"
 
 export default function ProjectPage({ params }: any) {
-  const { id } = use(params)
+  const { id } = use(params) as { id: string }
   const { user } = useAuth()
   const router = useRouter()
 
@@ -607,7 +607,6 @@ export default function ProjectPage({ params }: any) {
                             width: "100%",
                           }}
                         />
-                        {/* 👈 AQUÍ SE AÑADE EL GRABADOR WEB */}
                         <WebRecorder 
                           projectId={id} 
                           trackId={t.id} 
