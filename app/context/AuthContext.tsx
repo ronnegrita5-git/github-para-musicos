@@ -109,13 +109,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/dashboard")
   }
 
-  // 👈 USANDO LA URL DE SUPABASE
+  // 👈 FORZANDO LA URL DE VERCEL
   const signInWithGoogle = async () => {
-    console.log("🔵 Iniciando login con Google...")
+    const redirectUrl = 'https://github-para-musicos.vercel.app'
+    console.log("🔵 Redirigiendo a Google con callback:", redirectUrl)
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: 'https://faycvxctpilpnmeramcy.supabase.co/auth/v1/callback'
+        redirectTo: `${redirectUrl}/auth/callback`
       }
     })
     if (error) {
