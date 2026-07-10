@@ -169,7 +169,6 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
   // 🎤 ACTIVAR MICRÓFONO
   const toggleMic = async () => {
     if (isMicActive) {
-      // Desactivar micrófono
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach(track => track.stop())
         mediaStreamRef.current = null
@@ -221,7 +220,6 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
     }
   }
 
-  // Actualizar volumen del micrófono
   const updateMicVolume = (value: number) => {
     setMicVolume(value)
     if (gainNodeRef.current) {
