@@ -32,6 +32,7 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
   const { user } = useAuth()
   const [activeNotes, setActiveNotes] = useState<Set<string>>(new Set())
   const [isConnected, setIsConnected] = useState(false)
+  const [participants, setParticipants] = useState(0)
   const [isMicActive, setIsMicActive] = useState(false)
   const [micVolume, setMicVolume] = useState(50)
   
@@ -56,10 +57,8 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
     }
   }, [])
 
-  // Conectar a Supabase Realtime
+  // Conectar a Supabase Realtime (incluso sin login para escuchar)
   useEffect(() => {
-    if (!user) return
-
     const channel = supabase.channel(`jam:${sessionId}`)
     
     channel
@@ -68,7 +67,8 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
         { event: 'note' },
         (payload) => {
           const { note, action, userId, velocity } = payload.payload
-          if (userId === user.id) return
+          // No reproducir notas propias (si el usuario está logueado)
+          if (user && userId === user.id) return
           
           if (action === 'note-on') {
             playNote(note, velocity)
@@ -85,6 +85,9 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
       )
       .subscribe((status) => {
         setIsConnected(status === 'SUBSCRIBED')
+        if (status === 'SUBSCRIBED') {
+          setParticipants(1)
+        }
       })
 
     return () => {
@@ -162,6 +165,11 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
   }
 
   const toggleMic = async () => {
+    if (!user) {
+      alert('Debes iniciar sesión para usar el micrófono')
+      return
+    }
+
     if (isMicActive) {
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach(track => track.stop())
@@ -220,6 +228,8 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
   }
 
   const handleKeyDown = (note: string) => {
+    if (!user) return
+    
     if (activeNotes.has(note)) return
     
     playNote(note)
@@ -228,6 +238,8 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
   }
 
   const handleKeyUp = (note: string) => {
+    if (!user) return
+    
     if (!activeNotes.has(note)) return
     
     stopNote(note)
@@ -257,65 +269,84 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
         <h3 style={{ color: 'white', margin: 0 }}>
           🎹 Jam Session {isConnected ? '🟢 Conectado' : '🔴 Desconectado'}
         </h3>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ color: '#6b7280', fontSize: 14 }}>
+            👥 {participants} participantes
+          </span>
+          {!user && (
+            <Link href="/login" style={{
+              padding: '4px 12px',
+              background: '#10b981',
+              color: 'white',
+              borderRadius: 6,
+              textDecoration: 'none',
+              fontSize: 12,
+            }}>
+              Unirse
+            </Link>
+          )}
+        </div>
       </div>
 
-      {/* 🎤 CONTROLES DEL MICRÓFONO */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 16,
-        padding: '12px 16px',
-        background: 'rgba(255,255,255,0.05)',
-        borderRadius: 10,
-        marginBottom: 16,
-        flexWrap: 'wrap',
-      }}>
-        <button
-          onClick={toggleMic}
-          style={{
-            padding: '8px 20px',
-            background: isMicActive ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #10b981, #059669)',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            cursor: 'pointer',
-            fontSize: 14,
-            fontWeight: 'bold',
-          }}
-        >
-          {isMicActive ? '🔴 Desactivar micrófono' : '🎤 Activar micrófono'}
-        </button>
-        
-        {isMicActive && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#9ca3af', fontSize: 12 }}>🔊</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={micVolume}
-                onChange={(e) => updateMicVolume(parseInt(e.target.value))}
-                style={{
-                  width: 100,
-                  accentColor: '#10b981',
-                }}
-              />
-              <span style={{ color: '#9ca3af', fontSize: 12 }}>{micVolume}%</span>
-            </div>
-            <div style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              background: '#10b981',
-              animation: 'pulse 1s infinite',
-            }} />
-          </>
-        )}
-        <span style={{ color: '#6b7280', fontSize: 12 }}>
-          {isMicActive ? '🎤 Micrófono activo' : 'Micrófono desactivado'}
-        </span>
-      </div>
+      {/* 🎤 CONTROLES DEL MICRÓFONO (solo para usuarios logueados) */}
+      {user && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          padding: '12px 16px',
+          background: 'rgba(255,255,255,0.05)',
+          borderRadius: 10,
+          marginBottom: 16,
+          flexWrap: 'wrap',
+        }}>
+          <button
+            onClick={toggleMic}
+            style={{
+              padding: '8px 20px',
+              background: isMicActive ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #10b981, #059669)',
+              color: 'white',
+              border: 'none',
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 'bold',
+            }}
+          >
+            {isMicActive ? '🔴 Desactivar micrófono' : '🎤 Activar micrófono'}
+          </button>
+          
+          {isMicActive && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: '#9ca3af', fontSize: 12 }}>🔊</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={micVolume}
+                  onChange={(e) => updateMicVolume(parseInt(e.target.value))}
+                  style={{
+                    width: 100,
+                    accentColor: '#10b981',
+                  }}
+                />
+                <span style={{ color: '#9ca3af', fontSize: 12 }}>{micVolume}%</span>
+              </div>
+              <div style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                background: '#10b981',
+                animation: 'pulse 1s infinite',
+              }} />
+            </>
+          )}
+          <span style={{ color: '#6b7280', fontSize: 12 }}>
+            {isMicActive ? '🎤 Micrófono activo' : 'Micrófono desactivado'}
+          </span>
+        </div>
+      )}
 
       {/* 🎹 TECLADO VIRTUAL */}
       {user ? (
@@ -384,16 +415,20 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
       ) : (
         <div style={{
           textAlign: 'center',
-          padding: 40,
+          padding: 30,
           color: '#6b7280',
           border: '1px dashed rgba(16, 185, 129, 0.2)',
           borderRadius: 12,
         }}>
-          <p style={{ fontSize: 18, margin: 0 }}>🔒</p>
-          <p style={{ margin: '8px 0 0 0' }}>Inicia sesión para tocar en la jam session</p>
-          <Link href="/login" style={{ color: '#10b981', display: 'inline-block', marginTop: 12 }}>
-            Ir a iniciar sesión →
-          </Link>
+          <p style={{ fontSize: 18, margin: 0 }}>🎧</p>
+          <p style={{ margin: '8px 0 0 0' }}>
+            Estás escuchando la jam session
+          </p>
+          <p style={{ margin: '4px 0 0 0', fontSize: 14 }}>
+            <Link href="/login" style={{ color: '#10b981' }}>
+              Inicia sesión
+            </Link> para tocar y usar el micrófono
+          </p>
         </div>
       )}
 
@@ -404,7 +439,7 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
         fontSize: 14,
       }}>
         <p style={{ margin: 0 }}>
-          🎵 Toca las teclas o usa tu micrófono para tocar instrumentos reales
+          {user ? '🎵 Toca las teclas o usa tu micrófono' : '🎧 Escuchando la jam session en vivo'}
         </p>
         <p style={{ margin: '4px 0 0 0', fontSize: 12 }}>
           {isConnected ? '✅ Conectado a la jam session' : '⏳ Conectando...'}
