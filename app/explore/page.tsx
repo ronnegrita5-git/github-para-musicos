@@ -24,6 +24,7 @@ export default function ExplorePage() {
       let query = supabase
         .from("projects")
         .select("*")
+        .eq("is_public", true)
         .order("created_at", { ascending: false })
 
       if (searchTerm) {
@@ -108,114 +109,174 @@ export default function ExplorePage() {
   }
 
   return (
-    <div style={{ padding: 30, fontFamily: "Arial", maxWidth: 1200, margin: "0 auto" }}>
-      <Breadcrumbs />
-      
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
-        <h1>🌍 Explorar proyectos</h1>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Link href="/" style={{ textDecoration: "none", color: "#2b8a3e" }}>
-            ← Inicio
-          </Link>
-          {user && (
-            <Link href="/dashboard" style={{ textDecoration: "none", color: "#2b8a3e" }}>
-              🎸 Mis proyectos
-            </Link>
-          )}
-        </div>
-      </div>
+    <div style={{
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #0a0a0a 0%, #0f1a14 50%, #0a0a0a 100%)",
+      fontFamily: "'Inter', sans-serif",
+      padding: "20px",
+    }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+        {/* 👈 BREADCRUMBS AQUÍ */}
+        <Breadcrumbs />
 
-      {!user && (
         <div style={{
-          background: "#f0f0f0",
-          padding: 15,
-          borderRadius: 8,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "20px 0",
+          borderBottom: "1px solid rgba(16, 185, 129, 0.1)",
           marginBottom: 20,
-          textAlign: "center"
         }}>
-          <p>
-            👋 <Link href="/login" style={{ color: "#2b8a3e", fontWeight: "bold" }}>Inicia sesión</Link> para hacer fork de proyectos.
-          </p>
+          <h1 style={{
+            color: "white",
+            fontSize: 28,
+            margin: 0,
+            background: "linear-gradient(135deg, #10b981, #34d399)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+          }}>
+            🌍 Explorar proyectos
+          </h1>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Link href="/" style={{ color: "#10b981", textDecoration: "none" }}>
+              ← Inicio
+            </Link>
+            {user && (
+              <Link href="/dashboard" style={{ color: "#10b981", textDecoration: "none" }}>
+                🎸 Mis proyectos
+              </Link>
+            )}
+          </div>
         </div>
-      )}
 
-      <div style={{ marginTop: 20 }}>
-        <input
-          type="text"
-          placeholder="🔍 Buscar proyectos por nombre..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={{
-            width: "100%",
-            maxWidth: 500,
-            padding: 12,
+        {!user && (
+          <div style={{
+            background: "rgba(255,255,255,0.03)",
+            padding: 15,
             borderRadius: 8,
-            border: "1px solid #ccc",
-            fontSize: 16,
-          }}
-        />
-      </div>
+            marginBottom: 20,
+            textAlign: "center",
+            border: "1px solid rgba(16, 185, 129, 0.1)",
+          }}>
+            <p>
+              👋 <Link href="/login" style={{ color: "#10b981", fontWeight: "bold" }}>Inicia sesión</Link> para hacer fork de proyectos.
+            </p>
+          </div>
+        )}
 
-      <div style={{ marginTop: 30 }}>
+        <div style={{ marginBottom: 20 }}>
+          <input
+            type="text"
+            placeholder="🔍 Buscar proyectos por nombre..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: "100%",
+              maxWidth: 500,
+              padding: 12,
+              borderRadius: 8,
+              border: "1px solid rgba(16, 185, 129, 0.2)",
+              background: "rgba(255,255,255,0.05)",
+              color: "white",
+              fontSize: 16,
+            }}
+          />
+        </div>
+
         {loading ? (
-          <p>Cargando proyectos...</p>
+          <div style={{ color: "#10b981", textAlign: "center", padding: 40 }}>
+            🎧 Cargando proyectos...
+          </div>
         ) : projects.length === 0 ? (
-          <p style={{ textAlign: "center", color: "#666", marginTop: 40 }}>
-            {searchTerm ? "No se encontraron proyectos" : "No hay proyectos todavía"}
-          </p>
+          <div style={{
+            background: "rgba(255,255,255,0.03)",
+            borderRadius: 16,
+            padding: 60,
+            textAlign: "center",
+            border: "1px dashed rgba(16, 185, 129, 0.2)",
+          }}>
+            <p style={{ color: "#10b981", fontSize: 18, margin: 0 }}>
+              {searchTerm ? "No se encontraron proyectos" : "No hay proyectos públicos todavía"}
+            </p>
+          </div>
         ) : (
-          <div style={{ display: "grid", gap: 16 }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+            gap: 20,
+          }}>
             {projects.map((p) => (
               <div
                 key={p.id}
                 style={{
-                  padding: 16,
-                  border: "1px solid #e0e0e0",
-                  borderRadius: 12,
-                  background: "white",
+                  background: "rgba(255,255,255,0.03)",
+                  backdropFilter: "blur(10px)",
+                  borderRadius: 16,
+                  padding: 20,
+                  border: "1px solid rgba(16, 185, 129, 0.1)",
+                  transition: "all 0.3s ease",
                   display: "flex",
+                  flexDirection: "column",
                   justifyContent: "space-between",
-                  alignItems: "center",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-4px)"
+                  e.currentTarget.style.boxShadow = "0 8px 30px rgba(16, 185, 129, 0.08)"
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)"
+                  e.currentTarget.style.boxShadow = "none"
                 }}
               >
                 <div>
                   <Link href={`/project/${p.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                    <h3 style={{ margin: 0, color: "#2b8a3e" }}>🎵 {p.name}</h3>
+                    <h3 style={{ color: "white", margin: 0, fontSize: 18, fontWeight: 600 }}>
+                      🎵 {p.name}
+                    </h3>
+                    <p style={{ color: "#9ca3af", fontSize: 14, margin: "8px 0 0 0", lineHeight: 1.4 }}>
+                      {p.description || "Sin descripción"}
+                    </p>
+                    <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
+                      📅 {new Date(p.created_at).toLocaleDateString()}
+                    </div>
                   </Link>
-                  <p style={{ margin: "5px 0 0", color: "#666", fontSize: 14 }}>
-                    {p.description || "Sin descripción"}
-                  </p>
-                  <div style={{ fontSize: 12, color: "#888", marginTop: 5 }}>
-                    📅 {new Date(p.created_at).toLocaleDateString()}
-                  </div>
                 </div>
-                <div>
+                <div style={{ marginTop: 16 }}>
                   {user ? (
                     <button
                       onClick={() => forkProject(p)}
                       style={{
                         padding: "8px 16px",
-                        background: "#6f42c1",
+                        background: "linear-gradient(135deg, #6f42c1, #5a32a3)",
                         color: "white",
                         border: "none",
                         borderRadius: 8,
                         cursor: "pointer",
                         fontSize: 14,
+                        width: "100%",
+                        transition: "all 0.2s ease",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "scale(1.02)"
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "scale(1)"
                       }}
                     >
                       🔀 Fork
                     </button>
                   ) : (
-                    <Link href="/login">
+                    <Link href="/login" style={{ textDecoration: "none", display: "block" }}>
                       <button
                         style={{
                           padding: "8px 16px",
-                          background: "#6c757d",
+                          background: "#6b7280",
                           color: "white",
                           border: "none",
                           borderRadius: 8,
                           cursor: "pointer",
                           fontSize: 14,
+                          width: "100%",
                         }}
                       >
                         🔀 Fork (login)

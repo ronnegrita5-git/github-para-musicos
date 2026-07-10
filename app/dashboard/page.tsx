@@ -7,7 +7,6 @@ import { useAuth } from "../context/AuthContext"
 import { useRouter } from "next/navigation"
 import Breadcrumbs from "../components/Breadcrumbs"
 import NotificationBell from "../components/NotificationBell"
-import Navbar from "../components/Navbar"
 
 export default function DashboardPage() {
   const { user, signOut } = useAuth()
@@ -135,8 +134,11 @@ export default function DashboardPage() {
       padding: "20px",
     }}>
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+        {/* 👈 BREADCRUMBS AQUÍ */}
+        <Breadcrumbs />
+
         <div style={{
-          padding: "30px 0",
+          padding: "20px 0",
           borderBottom: "1px solid rgba(16, 185, 129, 0.1)",
           marginBottom: 30,
         }}>
@@ -155,6 +157,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
+        {/* Resto del contenido */}
         <button
           onClick={() => setShowCreate(!showCreate)}
           style={{
@@ -167,7 +170,6 @@ export default function DashboardPage() {
             fontSize: 16,
             fontWeight: "bold",
             marginBottom: 30,
-            transition: "all 0.3s ease",
           }}
         >
           {showCreate ? "✕ Cancelar" : "+ Nuevo Proyecto"}
@@ -335,7 +337,6 @@ export default function DashboardPage() {
                   </div>
                 </Link>
 
-                {/* Botones de acción */}
                 <div style={{
                   display: "flex",
                   gap: 8,
@@ -357,7 +358,6 @@ export default function DashboardPage() {
                       borderRadius: 6,
                       cursor: "pointer",
                       fontSize: 13,
-                      transition: "all 0.2s ease",
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = "rgba(239, 68, 68, 0.25)"
@@ -382,7 +382,6 @@ export default function DashboardPage() {
                       borderRadius: 6,
                       cursor: "pointer",
                       fontSize: 13,
-                      transition: "all 0.2s ease",
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = "rgba(16, 185, 129, 0.25)"
