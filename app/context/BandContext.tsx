@@ -56,7 +56,7 @@ const INSTRUMENTS: Record<BandType, string[]> = {
   ]
 }
 
-// ----- ICONOS PARA CADA INSTRUMENTO (con mejoras) -----
+// ----- ICONOS PARA CADA INSTRUMENTO (SIN DUPLICADOS) -----
 const INSTRUMENT_ICONS: Record<string, string> = {
   // Pop-Rock
   'Guitarra eléctrica': '🎸',
@@ -87,8 +87,7 @@ const INSTRUMENT_ICONS: Record<string, string> = {
   'Guitarra clásica': '🎸',
   'Laúd': '🎵',
   'Mandolina': '🎵',
-  'Piano': '🎹',
-  // Por si acaso
+  // 👈 SOLO UN 'Piano' (eliminado el duplicado)
   'Piano': '🎹'
 }
 
