@@ -166,24 +166,23 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
         samplerRef.current = sampler
         
         // Crear cadena de efectos según el instrumento
-        let chain = sampler
+        let chain: any = sampler
         
         if (instrument.hasDistortion) {
           const distortion = new Tone.Distortion(0.8)
           distortionRef.current = distortion
-          chain = chain.connect(distortion) as any
+          chain = chain.connect(distortion)
         }
         
         if (instrument.hasReverb) {
           const reverb = new Tone.Reverb({ decay: 2, wet: 0.3 })
           reverbRef.current = reverb
-          chain = chain.connect(reverb) as any
+          chain = chain.connect(reverb)
         }
         
         chain.connect(gain)
         
-        // Cargar samples
-        await sampler.load()
+        // Los samples se cargan automáticamente, no necesitamos .load()
         
       } catch (error) {
         console.error('Error iniciando audio:', error)
