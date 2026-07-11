@@ -36,16 +36,30 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   const signInWithGoogle = async () => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      console.log('🔴 Botón clickeado - iniciando login...')
+      
+      // Usar la URL actual del navegador para el redirect
+      const origin = window.location.origin
+      console.log('📍 Origen:', origin)
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'https://github-para-musicos-jet.vercel.app/auth/callback'
+          redirectTo: `${origin}/auth/callback`
         }
       })
-      if (error) throw error
+      
+      if (error) {
+        console.error('❌ Error:', error)
+        alert('Error: ' + error.message)
+        return
+      }
+      
+      console.log('✅ Redirigiendo a Google...')
+      
     } catch (error) {
-      console.error('Error en login:', error)
-      alert('Error al iniciar sesión: ' + (error as Error).message)
+      console.error('❌ Error inesperado:', error)
+      alert('Error inesperado: ' + (error as Error).message)
     }
   }
 

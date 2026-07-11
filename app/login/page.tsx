@@ -1,17 +1,21 @@
 "use client"
 
 import { useAuth } from '../context/AuthContext'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const { user, loading, signInWithGoogle } = useAuth()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (user) {
+      router.push('/dashboard')
+    }
+  }, [user, router])
 
   if (loading) {
     return <div style={{ color: 'white', textAlign: 'center', padding: '50px' }}>Cargando...</div>
-  }
-
-  if (user) {
-    window.location.href = '/dashboard'
-    return null
   }
 
   return (
