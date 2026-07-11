@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import AuthProvider from "./context/AuthContext";
+import UserStatus from "./components/UserStatus";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "GitHub para Músicos",
@@ -22,9 +24,33 @@ export default function RootLayout({
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}>
         <AuthProvider>
+          {/* Navbar global */}
+          <nav style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 24px',
+            background: 'rgba(255,255,255,0.03)',
+            borderBottom: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <Link href="/" style={{
+              fontSize: 20,
+              fontWeight: 'bold',
+              color: '#10b981',
+              textDecoration: 'none'
+            }}>
+              🎵 Music Collab
+            </Link>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+              <Link href="/" style={{ color: '#9ca3af', textDecoration: 'none' }}>Inicio</Link>
+              <Link href="/explore" style={{ color: '#9ca3af', textDecoration: 'none' }}>Explorar</Link>
+              <Link href="/jam" style={{ color: '#9ca3af', textDecoration: 'none' }}>Jam Session</Link>
+              <UserStatus />
+            </div>
+          </nav>
           {children}
         </AuthProvider>
       </body>
     </html>
-  );
+  )
 }

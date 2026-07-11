@@ -15,6 +15,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>
   signInWithEmail: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
+  refreshSession: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -31,24 +32,35 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const getSession = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession()
-        if (error) throw error
-        setUser(data?.session?.user ?? null)
-      } catch (error) {
-        console.error('Error obteniendo sesión:', error)
-      } finally {
-        setLoading(false)
-      }
+  // Función para obtener la sesión actual
+  const getSession = async () => {
+    try {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) throw error
+      console.log('🔍 Sesión obtenida:', data?.session?.user?.email || 'No hay sesión')
+      setUser(data?.session?.user ?? null)
+    } catch (error) {
+      console.error('Error obteniendo sesión:', error)
+      setUser(null)
+    } finally {
+      setLoading(false)
     }
+  }
 
+  useEffect(() => {
+    // Obtener sesión al cargar
     getSession()
 
+    // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log('🔐 Evento de autenticación:', event)
-      setUser(session?.user ?? null)
+      console.log('👤 Usuario:', session?.user?.email || 'No hay usuario')
+      
+      if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        setUser(null)
+      } else if (session) {
+        setUser(session.user)
+      }
       setLoading(false)
     })
 
@@ -82,12 +94,30 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
-    setUser(null)
+    try {
+      await supabase.auth.signOut()
+      setUser(null)
+      console.log('✅ Sesión cerrada')
+      // Redirigir a la página principal
+      window.location.href = '/'
+    } catch (error) {
+      console.error('Error cerrando sesión:', error)
+    }
+  }
+
+  const refreshSession = async () => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession()
+      if (error) throw error
+      setUser(data?.session?.user ?? null)
+      console.log('✅ Sesión refrescada')
+    } catch (error) {
+      console.error('Error refrescando sesión:', error)
+    }
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signInWithEmail, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signInWithEmail, signOut, refreshSession }}>
       {children}
     </AuthContext.Provider>
   )
