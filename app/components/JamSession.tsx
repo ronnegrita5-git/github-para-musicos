@@ -182,8 +182,6 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
         
         chain.connect(gain)
         
-        // Los samples se cargan automáticamente, no necesitamos .load()
-        
       } catch (error) {
         console.error('Error iniciando audio:', error)
         if (isMounted) {
@@ -219,8 +217,9 @@ export default function JamSession({ sessionId = 'default' }: JamSessionProps) {
           inputs[0].addListener('noteon', (event) => {
             const note = MIDI_TO_NOTE[event.note.number]
             if (note && user && isAudioReady) {
-              const velocity = event.velocity / 127
-              handleMidiNoteOn(note, velocity)
+              // Usar rawVelocity o velocity según la versión de webmidi
+              const velocity = (event as any).rawVelocity || (event as any).velocity || 100
+              handleMidiNoteOn(note, velocity / 127)
             }
           })
           
