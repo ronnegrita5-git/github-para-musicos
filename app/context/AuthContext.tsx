@@ -2,8 +2,16 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { User } from '@supabase/supabase-js'
 
-const AuthContext = createContext<any>(null)
+interface AuthContextType {
+  user: User | null
+  loading: boolean
+  signInWithGoogle: () => Promise<void>
+  signOut: () => Promise<void>
+}
+
+const AuthContext = createContext<AuthContextType | null>(null)
 
 export const useAuth = () => {
   const context = useContext(AuthContext)
@@ -14,20 +22,25 @@ export const useAuth = () => {
 }
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setUser(session?.user || null)
-      setLoading(false)
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        setUser(session?.user ?? null)
+      } catch (error) {
+        console.error('Error obteniendo sesión:', error)
+      } finally {
+        setLoading(false)
+      }
     }
 
     getSession()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null)
+      setUser(session?.user ?? null)
       setLoading(false)
     })
 
@@ -55,19 +68,16 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
-    setUser(null)
-  }
-
-  const value = {
-    user,
-    loading,
-    signInWithGoogle,
-    signOut
+    try {
+      await supabase.auth.signOut()
+      setUser(null)
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error)
+    }
   }
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   )
