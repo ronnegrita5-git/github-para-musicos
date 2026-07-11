@@ -2,19 +2,28 @@
 
 import { useAuth } from '../context/AuthContext'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const { user, loading, signInWithGoogle } = useAuth()
+  const router = useRouter()
   const [estado, setEstado] = useState('Esperando...')
+
+  // Redirigir si el usuario ya está logueado
+  useEffect(() => {
+    if (!loading && user) {
+      console.log('👤 Usuario detectado, redirigiendo a dashboard')
+      router.push('/dashboard')
+    }
+  }, [user, loading, router])
 
   if (loading) {
     return <div style={{ color: 'white', textAlign: 'center', padding: '50px' }}>Cargando...</div>
   }
 
   if (user) {
-    window.location.href = '/dashboard'
-    return null
+    return <div style={{ color: 'white', textAlign: 'center', padding: '50px' }}>Redirigiendo...</div>
   }
 
   const handleClick = async () => {
@@ -22,7 +31,7 @@ export default function LoginPage() {
     console.log('🖱️ Botón clickeado')
     try {
       await signInWithGoogle()
-      setEstado('✅ Login iniciado')
+      setEstado('✅ Redirigiendo a Google...')
     } catch (error) {
       setEstado('❌ Error: ' + (error as Error).message)
       console.error('❌ Error:', error)
@@ -89,7 +98,6 @@ export default function LoginPage() {
             Inicia sesión para tocar en la jam session
           </p>
           
-          {/* Estado del login */}
           <div style={{
             padding: '10px',
             marginBottom: '16px',

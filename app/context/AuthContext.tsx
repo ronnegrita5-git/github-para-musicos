@@ -26,10 +26,12 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Obtener sesión actual
     const getSession = async () => {
       try {
         const { data, error } = await supabase.auth.getSession()
         if (error) throw error
+        console.log('🔍 Sesión obtenida:', data?.session?.user?.email || 'No hay sesión')
         setUser(data?.session?.user ?? null)
       } catch (error) {
         console.error('Error obteniendo sesión:', error)
@@ -40,7 +42,10 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
     getSession()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    // Escuchar cambios en tiempo real
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('🔄 Evento de autenticación:', event)
+      console.log('👤 Usuario:', session?.user?.email || 'No hay usuario')
       setUser(session?.user ?? null)
       setLoading(false)
     })
@@ -52,8 +57,9 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   const signInWithGoogle = async () => {
     try {
-      // ⭐ FORZAR LA URL DE PRODUCCIÓN ⭐
-      const redirectUrl = 'https://github-para-musicos-v1yk.vercel.app/auth/callback'
+      console.log('🔄 Iniciando login...')
+      const origin = window.location.origin
+      const redirectUrl = `${origin}/auth/callback`
       console.log('📍 Redirigiendo a:', redirectUrl)
       
       const { data, error } = await supabase.auth.signInWithOAuth({
@@ -65,15 +71,15 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       
       if (error) {
         console.error('❌ Error:', error)
-        alert('Error: ' + error.message)
-        return
+        throw error
       }
       
-      console.log('✅ Login iniciado correctamente')
+      console.log('✅ Login iniciado, redirigiendo a Google...')
+      // La redirección la maneja Supabase automáticamente
       
     } catch (error) {
       console.error('❌ Error inesperado:', error)
-      alert('Error inesperado: ' + (error as Error).message)
+      alert('Error al iniciar sesión: ' + (error as Error).message)
     }
   }
 
@@ -81,6 +87,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     try {
       await supabase.auth.signOut()
       setUser(null)
+      console.log('✅ Sesión cerrada')
     } catch (error) {
       console.error('Error cerrando sesión:', error)
     }
