@@ -4,7 +4,14 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
 
-const AuthContext = createContext<any>(null)
+interface AuthContextType {
+  user: User | null
+  loading: boolean
+  signInWithGoogle: () => Promise<void>
+  signOut: () => Promise<void>
+}
+
+const AuthContext = createContext<AuthContextType | null>(null)
 
 export const useAuth = () => {
   const context = useContext(AuthContext)
@@ -19,28 +26,34 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Obtener sesión al cargar
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
+    const getSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (error) throw error
+        setUser(data?.session?.user ?? null)
+      } catch (error) {
+        console.error('Error obteniendo sesión:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
 
-    // Escuchar cambios de autenticación
+    getSession()
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
       setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signInWithGoogle = async () => {
     try {
-      console.log('🔴 Botón clickeado - iniciando login...')
-      
-      // Usar la URL actual del navegador para el redirect
       const origin = window.location.origin
-      console.log('📍 Origen:', origin)
+      console.log('📍 Login desde:', origin)
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -55,7 +68,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         return
       }
       
-      console.log('✅ Redirigiendo a Google...')
+      console.log('✅ Login iniciado correctamente')
       
     } catch (error) {
       console.error('❌ Error inesperado:', error)
@@ -64,8 +77,12 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
-    setUser(null)
+    try {
+      await supabase.auth.signOut()
+      setUser(null)
+    } catch (error) {
+      console.error('Error cerrando sesión:', error)
+    }
   }
 
   return (
