@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
+import { User } from '@supabase/supabase-js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,7 +10,7 @@ const supabase = createClient(
 )
 
 interface AuthContextType {
-  user: any
+  user: User | null
   loading: boolean
   signInWithGoogle: () => Promise<void>
   signOut: () => Promise<void>
@@ -26,7 +27,7 @@ export const useAuth = () => {
 }
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -58,7 +59,6 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       const origin = window.location.origin
       console.log('📍 Login desde:', origin)
       
-      // Obtener la URL de autenticación
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -72,7 +72,6 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         return
       }
       
-      // Redirigir manualmente a la URL de Google
       if (data?.url) {
         console.log('🔄 Redirigiendo a:', data.url)
         window.location.href = data.url
