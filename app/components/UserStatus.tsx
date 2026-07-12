@@ -2,20 +2,16 @@
 
 import { useAuth } from '../context/AuthContext'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
 
 export default function UserStatus() {
   const { user, loading, signOut } = useAuth()
-  const [isClient, setIsClient] = useState(false)
 
-  useEffect(() => {
-    setIsClient(true)
-  }, [])
-
-  if (!isClient || loading) {
-    return <span style={{ color: '#6b7280', fontSize: 14 }}>⏳ Cargando...</span>
+  // Si está cargando, mostrar un placeholder
+  if (loading) {
+    return <span style={{ color: '#6b7280', fontSize: 14 }}>...</span>
   }
 
+  // Si hay usuario, mostrar su email y botón de cerrar sesión
   if (user) {
     return (
       <div style={{
@@ -30,7 +26,7 @@ export default function UserStatus() {
           color: '#10b981',
           fontSize: 14
         }}>
-          🟢 {user.email}
+          🟢 {String(user.email || 'Usuario')}
         </span>
         <button
           onClick={signOut}
@@ -50,6 +46,7 @@ export default function UserStatus() {
     )
   }
 
+  // Si no hay usuario, mostrar el botón de iniciar sesión
   return (
     <Link
       href="/login"
