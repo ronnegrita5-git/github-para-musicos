@@ -24,8 +24,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [loadingTracks, setLoadingTracks] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Función para cargar las pistas
-  const fetchTracks = async () => {
+  // ✅ Función para cargar pistas
+  const loadTracks = async () => {
     try {
       const { data, error } = await supabase!
         .from("tracks")
@@ -64,16 +64,9 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
     if (id) {
       fetchProject()
-      fetchTracks()
+      loadTracks()
     }
   }, [id])
-
-  // ✅ Función para actualizar pistas SIN recargar la página
-  const refreshTracks = async () => {
-    console.log("🔄 Actualizando pistas...")
-    setLoadingTracks(true)
-    await fetchTracks()
-  }
 
   if (loading) {
     return <div style={{ padding: 40, color: "white" }}>⏳ Cargando proyecto...</div>
@@ -163,13 +156,19 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               <div style={{ marginBottom: 12 }}>
                 <MultiUpload 
                   projectId={id} 
-                  onUploadComplete={refreshTracks}  // ✅ Actualiza sin recargar
+                  onUploadComplete={() => {
+                    console.log("🔄 Recargando pistas...")
+                    loadTracks()
+                  }}
                 />
               </div>
               <div>
                 <WebRecorder 
                   projectId={id} 
-                  onRecordingComplete={refreshTracks}  // ✅ Actualiza sin recargar
+                  onRecordingComplete={() => {
+                    console.log("🔄 Recargando pistas...")
+                    loadTracks()
+                  }}
                 />
               </div>
             </div>
