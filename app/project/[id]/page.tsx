@@ -100,6 +100,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       }
       return newSet
     })
+    // Resetear reproducción al cambiar selección
+    setIsPlaying(false)
+    setCurrentTrackIndex(-1)
+    setAudioUrl("")
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ""
+    }
   }
 
   const selectAllTracks = () => {
@@ -119,6 +127,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // 🎵 Auto-reproducir cuando se selecciona la primera pista
   const playSelectedTracks = () => {
     const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
     if (selected.length === 0) {
