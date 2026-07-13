@@ -23,9 +23,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true)
   const [loadingTracks, setLoadingTracks] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isPlayingAll, setIsPlayingAll] = useState(false)
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(-1)
-  const [audioProgress, setAudioProgress] = useState(0)
+  const [audioUrl, setAudioUrl] = useState<string>("")
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const loadTracks = async () => {
@@ -88,41 +87,18 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }, [id])
 
-  // 🎵 Funciones para reproducir todas las pistas
-  const playAllTracks = () => {
-    if (tracks.length === 0) return
-    
-    const audioUrls = tracks
-      .map(t => t.audio_url)
-      .filter(url => url && url.length > 0)
-    
-    if (audioUrls.length === 0) {
-      alert("No hay pistas con audio para reproducir")
-      return
-    }
-
-    setIsPlayingAll(true)
-    setCurrentTrackIndex(0)
-    setAudioProgress(0)
-    
+  // 🎵 Función para reproducir una pista específica
+  const playTrack = (trackUrl: string, index: number) => {
+    setCurrentTrackIndex(index)
+    setAudioUrl(trackUrl)
     if (audioRef.current) {
-      audioRef.current.src = audioUrls[0]
+      audioRef.current.src = trackUrl
       audioRef.current.play()
     }
   }
 
-  const stopAllTracks = () => {
-    setIsPlayingAll(false)
-    setCurrentTrackIndex(-1)
-    setAudioProgress(0)
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-      audioRef.current.src = ""
-    }
-  }
-
-  const onTrackEnd = () => {
+  // 🎵 Función para avanzar a la siguiente pista
+  const playNextTrack = () => {
     const audioUrls = tracks
       .map(t => t.audio_url)
       .filter(url => url && url.length > 0)
@@ -130,20 +106,18 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     const nextIndex = currentTrackIndex + 1
     if (nextIndex < audioUrls.length) {
       setCurrentTrackIndex(nextIndex)
-      setAudioProgress(0)
+      setAudioUrl(audioUrls[nextIndex])
       if (audioRef.current) {
         audioRef.current.src = audioUrls[nextIndex]
         audioRef.current.play()
       }
     } else {
-      stopAllTracks()
-    }
-  }
-
-  const onTimeUpdate = () => {
-    if (audioRef.current) {
-      const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100
-      setAudioProgress(progress || 0)
+      setCurrentTrackIndex(-1)
+      setAudioUrl("")
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ""
+      }
     }
   }
 
@@ -171,28 +145,36 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white" }}>
-      {/* Reproductor de audio oculto con controles */}
-      <audio
-        ref={audioRef}
-        onEnded={onTrackEnd}
-        onTimeUpdate={onTimeUpdate}
-        onError={() => {
-          console.error("Error en audio, pasando al siguiente...")
-          onTrackEnd()
-        }}
-        controls
-        style={{ 
+      {/* Reproductor de audio fijo en la parte inferior */}
+      {audioUrls.length > 0 && (
+        <div style={{
           position: "fixed",
           bottom: 0,
           left: 0,
           right: 0,
-          width: "100%",
-          height: "48px",
           background: "#1a1a1a",
+          padding: "8px 16px",
+          borderTop: "1px solid #333",
           zIndex: 1000,
-          padding: "4px 16px"
-        }}
-      />
+          display: "flex",
+          alignItems: "center",
+          gap: "12px"
+        }}>
+          <span style={{ color: "#6b7280", fontSize: 12, minWidth: 120 }}>
+            {currentTrackIndex >= 0 ? tracks[currentTrackIndex]?.name || "Reproduciendo" : "Selecciona una pista"}
+          </span>
+          <audio
+            ref={audioRef}
+            controls
+            src={audioUrl}
+            onEnded={playNextTrack}
+            style={{ flex: 1, height: "40px" }}
+          />
+          <span style={{ color: "#6b7280", fontSize: 12, minWidth: 60 }}>
+            {currentTrackIndex + 1}/{audioUrls.length}
+          </span>
+        </div>
+      )}
 
       <aside style={{ width: 240, padding: "24px 16px", background: "rgba(255,255,255,0.03)", borderRight: "1px solid rgba(255,255,255,0.1)" }}>
         <div style={{ padding: "0 8px 16px", fontSize: 20, fontWeight: "bold", color: "#10b981" }}>🎵 Music Collab</div>
@@ -253,47 +235,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
         {/* 🎵 SECCIÓN DE PISTAS */}
         <div style={{ marginTop: 32 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h2 style={{ fontSize: 24, margin: 0 }}>🎵 Pistas</h2>
-            
-            {audioUrls.length > 0 && (
-              <div>
-                {!isPlayingAll ? (
-                  <button
-                    onClick={playAllTracks}
-                    style={{
-                      padding: "8px 16px",
-                      background: "#10b981",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      fontSize: 14,
-                      fontWeight: "bold"
-                    }}
-                  >
-                    ▶ Reproducir todas ({audioUrls.length})
-                  </button>
-                ) : (
-                  <button
-                    onClick={stopAllTracks}
-                    style={{
-                      padding: "8px 16px",
-                      background: "#ef4444",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      fontSize: 14,
-                      fontWeight: "bold"
-                    }}
-                  >
-                    ⏹ Detener
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          <h2 style={{ fontSize: 24, marginBottom: 16 }}>🎵 Pistas</h2>
 
           {isCreator && (
             <div style={{ marginBottom: 24 }}>
@@ -329,7 +271,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               {tracks.map((track, index) => {
                 const audioUrl = track.audio_url
                 const hasAudio = audioUrl && audioUrl.length > 0
-                const isCurrentTrack = isPlayingAll && index === currentTrackIndex
+                const isCurrentTrack = currentTrackIndex === index
 
                 return (
                   <div key={track.id} style={{
@@ -339,7 +281,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                     padding: "12px 16px",
                     background: isCurrentTrack ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)",
                     borderRadius: 8,
-                    border: isCurrentTrack ? "1px solid rgba(16,185,129,0.3)" : "1px solid rgba(255,255,255,0.05)"
+                    border: isCurrentTrack ? "1px solid rgba(16,185,129,0.3)" : "1px solid rgba(255,255,255,0.05)",
+                    cursor: hasAudio ? "pointer" : "default"
+                  }}
+                  onClick={() => {
+                    if (hasAudio) {
+                      playTrack(audioUrl, index)
+                    }
                   }}>
                     <div>
                       <p style={{ margin: 0, color: "white" }}>
@@ -352,13 +300,18 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                       {hasAudio ? (
-                        <audio controls src={audioUrl} style={{ height: 32, width: 150 }} />
+                        <span style={{ color: "#10b981", fontSize: 12 }}>
+                          {isCurrentTrack ? "🔊 Reproduciendo" hasAudio ? "🎵" : ""}
+                        </span>
                       ) : (
                         <span style={{ color: "#6b7280", fontSize: 12 }}>Sin audio</span>
                       )}
                       {isCreator && (
                         <button
-                          onClick={() => deleteTrack(track.id)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteTrack(track.id)
+                          }}
                           style={{
                             background: "none",
                             border: "none",
