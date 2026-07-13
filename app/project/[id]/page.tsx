@@ -25,6 +25,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [error, setError] = useState<string | null>(null)
   const [isPlayingAll, setIsPlayingAll] = useState(false)
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(-1)
+  const [audioProgress, setAudioProgress] = useState(0)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const loadTracks = async () => {
@@ -102,6 +103,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
     setIsPlayingAll(true)
     setCurrentTrackIndex(0)
+    setAudioProgress(0)
     
     if (audioRef.current) {
       audioRef.current.src = audioUrls[0]
@@ -112,8 +114,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const stopAllTracks = () => {
     setIsPlayingAll(false)
     setCurrentTrackIndex(-1)
+    setAudioProgress(0)
     if (audioRef.current) {
       audioRef.current.pause()
+      audioRef.current.currentTime = 0
       audioRef.current.src = ""
     }
   }
@@ -126,12 +130,20 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     const nextIndex = currentTrackIndex + 1
     if (nextIndex < audioUrls.length) {
       setCurrentTrackIndex(nextIndex)
+      setAudioProgress(0)
       if (audioRef.current) {
         audioRef.current.src = audioUrls[nextIndex]
         audioRef.current.play()
       }
     } else {
       stopAllTracks()
+    }
+  }
+
+  const onTimeUpdate = () => {
+    if (audioRef.current) {
+      const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100
+      setAudioProgress(progress || 0)
     }
   }
 
@@ -159,14 +171,27 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white" }}>
+      {/* Reproductor de audio oculto con controles */}
       <audio
         ref={audioRef}
         onEnded={onTrackEnd}
+        onTimeUpdate={onTimeUpdate}
         onError={() => {
           console.error("Error en audio, pasando al siguiente...")
           onTrackEnd()
         }}
-        style={{ display: "none" }}
+        controls
+        style={{ 
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          width: "100%",
+          height: "48px",
+          background: "#1a1a1a",
+          zIndex: 1000,
+          padding: "4px 16px"
+        }}
       />
 
       <aside style={{ width: 240, padding: "24px 16px", background: "rgba(255,255,255,0.03)", borderRight: "1px solid rgba(255,255,255,0.1)" }}>
@@ -175,7 +200,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         <Link href="/explore" style={{ padding: "10px 12px", borderRadius: 8, color: "#9ca3af", textDecoration: "none", display: "block" }}>📁 Proyectos</Link>
       </aside>
 
-      <main style={{ flex: 1, padding: "40px", maxWidth: "800px" }}>
+      <main style={{ flex: 1, padding: "40px", maxWidth: "800px", paddingBottom: "80px" }}>
         <Link href="/explore" style={{ color: "#10b981", textDecoration: "none" }}>← Volver a proyectos</Link>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20 }}>
@@ -327,7 +352,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                       {hasAudio ? (
-                        <audio controls src={audioUrl} style={{ height: 32 }} />
+                        <audio controls src={audioUrl} style={{ height: 32, width: 150 }} />
                       ) : (
                         <span style={{ color: "#6b7280", fontSize: 12 }}>Sin audio</span>
                       )}
@@ -339,7 +364,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                             border: "none",
                             color: "#ef4444",
                             cursor: "pointer",
-                            fontSize: 18,
+                            fontSize: 16,
                             padding: "0 4px"
                           }}
                           title="Eliminar pista"
