@@ -2,13 +2,26 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { supabase } from '@/lib/supabase'
-import { User } from '@supabase/supabase-js'
+
+interface User {
+  id: string
+  email: string
+  first_name?: string
+  last_name?: string
+  city?: string
+  country?: string
+  instrument_id?: string
+  music_genre?: string
+  bio?: string
+  avatar_url?: string
+  created_at?: string
+}
 
 interface AuthContextType {
   user: User | null
   loading: boolean
-  signInWithGoogle: () => Promise<void>
-  signInWithEmail: (email: string, password: string) => Promise<void>
+  signIn: (email: string, password: string) => Promise<void>
+  signUp: (email: string, password: string, userData?: Partial<User>) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -20,8 +33,8 @@ export const useAuth = () => {
     return {
       user: null,
       loading: false,
-      signInWithGoogle: async () => {},
-      signInWithEmail: async () => {},
+      signIn: async () => {},
+      signUp: async () => {},
       signOut: async () => {},
     } as AuthContextType
   }
@@ -33,60 +46,106 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const loadSession = async () => {
-      try {
-        const { data, error } = await supabase!.auth.getSession()
-        if (error) throw error
-        setUser(data?.session?.user ?? null)
-        console.log('🔐 Sesión cargada:', data?.session?.user?.email || 'No hay sesión')
-      } catch (error) {
-        console.error('Error al cargar sesión:', error)
-      } finally {
-        setLoading(false)
-      }
+    const savedUser = localStorage.getItem('user')
+    if (savedUser) {
+      setUser(JSON.parse(savedUser))
     }
-
-    loadSession()
+    setLoading(false)
 
     const { data: { subscription } } = supabase!.auth.onAuthStateChange((event, session) => {
-      console.log('🔐 Evento de auth:', event)
       if (event === 'SIGNED_OUT') {
         setUser(null)
-      } else if (session) {
-        setUser(session.user)
+        localStorage.removeItem('user')
       }
-      setLoading(false)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
-  const signInWithGoogle = async () => {
+  const signUp = async (email: string, password: string, userData?: Partial<User>) => {
     try {
-      const redirectUrl = 'https://github-para-musicos-jet.vercel.app/auth/callback'
-      console.log('📍 Redirigiendo a:', redirectUrl)
-      
-      const { data, error } = await supabase!.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl
-        }
+      const { data, error } = await supabase!.auth.signUp({
+        email,
+        password,
       })
+
       if (error) throw error
-      if (data?.url) window.location.href = data.url
+
+      if (data.user) {
+        const { error: dbError } = await supabase!
+          .from('users')
+          .insert({
+            id: data.user.id,
+            email,
+            first_name: userData?.first_name || null,
+            last_name: userData?.last_name || null,
+            city: userData?.city || null,
+            country: userData?.country || null,
+            instrument_id: userData?.instrument_id || null,
+            music_genre: userData?.music_genre || null,
+            bio: userData?.bio || null,
+          })
+
+        if (dbError) throw dbError
+
+        const newUser = {
+          id: data.user.id,
+          email,
+          first_name: userData?.first_name || '',
+          last_name: userData?.last_name || '',
+          city: userData?.city || '',
+          country: userData?.country || '',
+          instrument_id: userData?.instrument_id || '',
+          music_genre: userData?.music_genre || '',
+          bio: userData?.bio || '',
+        }
+
+        setUser(newUser)
+        localStorage.setItem('user', JSON.stringify(newUser))
+      }
     } catch (error) {
-      console.error('Error en login con Google:', error)
-      alert('Error al iniciar sesión con Google')
+      console.error('Error en registro:', error)
+      throw error
     }
   }
 
-  const signInWithEmail = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string) => {
     try {
-      const { data, error } = await supabase!.auth.signInWithPassword({ email, password })
+      const { data, error } = await supabase!.auth.signInWithPassword({
+        email,
+        password,
+      })
+
       if (error) throw error
-      setUser(data.user)
+
+      if (data.user) {
+        const { data: userData, error: dbError } = await supabase!
+          .from('users')
+          .select('*')
+          .eq('id', data.user.id)
+          .single()
+
+        if (dbError) throw dbError
+
+        const loggedUser = {
+          id: userData.id,
+          email: userData.email,
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+          city: userData.city || '',
+          country: userData.country || '',
+          instrument_id: userData.instrument_id || '',
+          music_genre: userData.music_genre || '',
+          bio: userData.bio || '',
+          avatar_url: userData.avatar_url || '',
+          created_at: userData.created_at,
+        }
+
+        setUser(loggedUser)
+        localStorage.setItem('user', JSON.stringify(loggedUser))
+      }
     } catch (error) {
-      console.error('Error en login con email:', error)
+      console.error('Error en login:', error)
       throw error
     }
   }
@@ -95,15 +154,14 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await supabase!.auth.signOut()
       setUser(null)
-      // ✅ NO redirigir a /, mantener la página actual
-      console.log('✅ Sesión cerrada, permaneciendo en la página actual')
+      localStorage.removeItem('user')
     } catch (error) {
       console.error('Error al cerrar sesión:', error)
     }
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signInWithEmail, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   )

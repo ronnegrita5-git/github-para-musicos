@@ -42,7 +42,7 @@ export default function RootLayout({
             </Link>
             <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
               <Link href="/" style={{ color: '#9ca3af', textDecoration: 'none' }}>Inicio</Link>
-              <Link href="/explore" style={{ color: '#10b981', textDecoration: 'none', fontWeight: 'bold' }}>📁 Proyectos</Link>
+              <Link href="/explore" style={{ color: '#9ca3af', textDecoration: 'none' }}>Proyectos</Link>
               <UserStatus />
             </div>
           </nav>
