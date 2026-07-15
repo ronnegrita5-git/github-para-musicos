@@ -76,14 +76,15 @@ export default function RegisterPage() {
     setLoadingSubmit(true)
 
     try {
+      // ✅ Pasar undefined en lugar de null
       await signUp(email, password, {
-        first_name: firstName,
-        last_name: lastName,
-        city,
-        country,
-        instrument_id: instrumentId || null,
-        music_genre: musicGenre || null,
-        bio: bio || null,
+        first_name: firstName || undefined,
+        last_name: lastName || undefined,
+        city: city || undefined,
+        country: country || undefined,
+        instrument_id: instrumentId || undefined,
+        music_genre: musicGenre || undefined,
+        bio: bio || undefined,
       })
       
       setSuccess(true)
