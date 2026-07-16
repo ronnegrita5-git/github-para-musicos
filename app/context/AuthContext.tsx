@@ -123,22 +123,43 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
           .from('users')
           .select('*')
           .eq('id', data.user.id)
-          .single()
+          .maybeSingle()
 
-        if (dbError) throw dbError
+        let loggedUser
 
-        const loggedUser = {
-          id: userData.id,
-          email: userData.email,
-          first_name: userData.first_name || '',
-          last_name: userData.last_name || '',
-          city: userData.city || '',
-          country: userData.country || '',
-          instrument_id: userData.instrument_id || '',
-          music_genre: userData.music_genre || '',
-          bio: userData.bio || '',
-          avatar_url: userData.avatar_url || '',
-          created_at: userData.created_at,
+        if (!userData) {
+          loggedUser = {
+            id: data.user.id,
+            email: data.user.email || email,
+            first_name: '',
+            last_name: '',
+            city: '',
+            country: '',
+            instrument_id: '',
+            music_genre: '',
+            bio: '',
+            avatar_url: '',
+            created_at: new Date().toISOString(),
+          }
+
+          await supabase!.from('users').insert({
+            id: loggedUser.id,
+            email: loggedUser.email,
+          }).maybeSingle()
+        } else {
+          loggedUser = {
+            id: userData.id,
+            email: userData.email,
+            first_name: userData.first_name || '',
+            last_name: userData.last_name || '',
+            city: userData.city || '',
+            country: userData.country || '',
+            instrument_id: userData.instrument_id || '',
+            music_genre: userData.music_genre || '',
+            bio: userData.bio || '',
+            avatar_url: userData.avatar_url || '',
+            created_at: userData.created_at,
+          }
         }
 
         setUser(loggedUser)
