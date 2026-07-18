@@ -27,7 +27,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(-1)
   const [audioUrl, setAudioUrl] = useState<string>("")
   const [isPlaying, setIsPlaying] = useState(false)
-  const [isForked, setIsForked] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const loadTracks = async () => {
@@ -47,7 +46,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ✅ Eliminar pista
   const deleteTrack = async (trackId: string) => {
     if (!user) {
       alert("Debes iniciar sesión para eliminar pistas")
@@ -73,7 +71,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ✅ Eliminar proyecto
   const deleteProject = async () => {
     if (!user) {
       alert("Debes iniciar sesión para eliminar el proyecto")
@@ -97,45 +94,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  const forkProject = async () => {
-    if (!user) {
-      alert("Debes iniciar sesión para hacer fork")
-      return
-    }
-
-    try {
-      const { data: newProject, error: forkError } = await supabase
-        .from("projects")
-        .insert({
-          name: `Fork de ${project.name}`,
-          description: project.description,
-          user_id: user.id,
-          is_public: true,
-        })
-        .select()
-        .single()
-
-      if (forkError) throw forkError
-
-      for (const track of tracks) {
-        await supabase
-          .from("tracks")
-          .insert({
-            name: track.name,
-            audio_url: track.audio_url,
-            project_id: newProject.id,
-            user_id: user.id,
-          })
-      }
-
-      alert("✅ Fork creado correctamente")
-      window.location.href = `/project/${newProject.id}`
-    } catch (error) {
-      console.error("Error haciendo fork:", error)
-      alert("Error al hacer fork del proyecto")
-    }
-  }
-
   useEffect(() => {
     const fetchProject = async () => {
       try {
@@ -147,10 +105,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
         if (error) throw error
         setProject(data)
-        
-        if (data.name && data.name.startsWith("Fork de ")) {
-          setIsForked(true)
-        }
       } catch (err) {
         console.error("Error cargando proyecto:", err)
         setError("No se pudo cargar el proyecto")
@@ -279,59 +233,38 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         <Link href="/explore" style={{ color: "#10b981", textDecoration: "none" }}>← Volver a proyectos</Link>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20 }}>
-          <h1 style={{ fontSize: 32, margin: 0 }}>
-            {isForked ? "🔀 " : ""}{projectName}
-          </h1>
-          <div style={{ display: "flex", gap: "8px" }}>
-            {!isCreator && user && (
-              <button
-                onClick={forkProject}
-                style={{
-                  padding: "8px 16px",
-                  background: "#10b981",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontSize: 13,
-                  fontWeight: "bold"
-                }}
-              >
-                🔀 Fork
-              </button>
-            )}
-            {isCreator && (
-              <button
-                onClick={async () => {
-                  if (!confirm(`¿Cambiar el proyecto a ${project.is_public ? 'privado' : 'público'}?`)) return
-                  try {
-                    const { error } = await supabase
-                      .from("projects")
-                      .update({ is_public: !project.is_public })
-                      .eq("id", id)
-                      .eq("user_id", user.id)
-                    if (error) throw error
-                    setProject({ ...project, is_public: !project.is_public })
-                  } catch (error) {
-                    console.error("Error cambiando visibilidad:", error)
-                    alert("Error al cambiar la visibilidad")
-                  }
-                }}
-                style={{
-                  padding: "6px 14px",
-                  background: project.is_public ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
-                  color: project.is_public ? "#10b981" : "#ef4444",
-                  border: "1px solid " + (project.is_public ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"),
-                  borderRadius: 20,
-                  cursor: "pointer",
-                  fontSize: 13,
-                  fontWeight: "bold"
-                }}
-              >
-                {project.is_public ? "🌍 Público" : "🔒 Privado"}
-              </button>
-            )}
-          </div>
+          <h1 style={{ fontSize: 32, margin: 0 }}>{projectName}</h1>
+          {isCreator && (
+            <button
+              onClick={async () => {
+                if (!confirm(`¿Cambiar el proyecto a ${project.is_public ? 'privado' : 'público'}?`)) return
+                try {
+                  const { error } = await supabase
+                    .from("projects")
+                    .update({ is_public: !project.is_public })
+                    .eq("id", id)
+                    .eq("user_id", user.id)
+                  if (error) throw error
+                  setProject({ ...project, is_public: !project.is_public })
+                } catch (error) {
+                  console.error("Error cambiando visibilidad:", error)
+                  alert("Error al cambiar la visibilidad")
+                }
+              }}
+              style={{
+                padding: "6px 14px",
+                background: project.is_public ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
+                color: project.is_public ? "#10b981" : "#ef4444",
+                border: "1px solid " + (project.is_public ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"),
+                borderRadius: 20,
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: "bold"
+              }}
+            >
+              {project.is_public ? "🌍 Público" : "🔒 Privado"}
+            </button>
+          )}
         </div>
 
         <p style={{ color: "#9ca3af", fontSize: 16, marginTop: 8 }}>{projectDescription}</p>
@@ -345,9 +278,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           <p style={{ color: "#6b7280", fontSize: 14 }}>
             🎵 Pistas: {tracks.length}
           </p>
-          {isForked && (
-            <p style={{ color: "#fbbf24", fontSize: 14 }}>🔀 Este proyecto es un fork</p>
-          )}
         </div>
 
         {/* 🎵 SECCIÓN DE PISTAS */}
@@ -389,7 +319,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {/* 📤 Subir pistas - SOLO para el creador */}
           {isCreator && (
             <div style={{ marginBottom: 24 }}>
               <div style={{ marginBottom: 12 }}>
@@ -468,7 +397,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                         {!hasAudio && (
                           <span style={{ color: "#6b7280", fontSize: 12 }}>Sin audio</span>
                         )}
-                        {/* 🗑️ Botón eliminar pista - SOLO CREADOR */}
                         {isCreator && (
                           <button
                             onClick={(e) => {
@@ -494,7 +422,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                 })}
               </div>
 
-              {/* 🎵 REPRODUCTOR DE AUDIO */}
               {audioUrl && isPlaying && (
                 <div style={{
                   marginTop: 20,
@@ -552,7 +479,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           )}
         </div>
 
-        {/* 🗑️ BOTÓN DE ELIMINAR PROYECTO - SOLO CREADOR */}
         {isCreator && (
           <div style={{ marginTop: 24, display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <button
