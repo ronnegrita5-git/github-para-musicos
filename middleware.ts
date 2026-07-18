@@ -1,14 +1,7 @@
-import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const code = searchParams.get('code')
-
-  if (!code) {
-    return NextResponse.redirect(new URL('/login?error=no-code', request.url))
-  }
-
+export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -32,11 +25,13 @@ export async function GET(request: NextRequest) {
     }
   )
 
-  const { error } = await supabase.auth.exchangeCodeForSession(code)
+  await supabase.auth.getUser()
 
-  if (error) {
-    return NextResponse.redirect(new URL('/login?error=auth', request.url))
-  }
+  return supabaseResponse
+}
 
-  return NextResponse.redirect(new URL('/explore', request.url))
+export const config = {
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 }
