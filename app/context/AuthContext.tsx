@@ -158,63 +158,47 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signIn = async (email: string, password: string) => {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
-      if (error) throw error
+    if (error) throw error
 
-      if (data.user) {
-        const { data: userData, error: dbError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', data.user.id)
-          .maybeSingle()
+    if (data.user) {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', data.user.id)
+        .maybeSingle()
 
-        let loggedUser
-
-        if (!userData) {
-          loggedUser = {
-            id: data.user.id,
-            email: data.user.email || email,
-            first_name: '',
-            last_name: '',
-            city: '',
-            country: '',
-            instrument_id: '',
-            music_genre: '',
-            bio: '',
-            avatar_url: '',
-            created_at: new Date().toISOString(),
-          }
-
-          await supabase.from('users').insert({
-            id: loggedUser.id,
-            email: loggedUser.email,
-          })
-        } else {
-          loggedUser = {
-            id: userData.id,
-            email: userData.email,
-            first_name: userData.first_name || '',
-            last_name: userData.last_name || '',
-            city: userData.city || '',
-            country: userData.country || '',
-            instrument_id: userData.instrument_id || '',
-            music_genre: userData.music_genre || '',
-            bio: userData.bio || '',
-            avatar_url: userData.avatar_url || '',
-            created_at: userData.created_at,
-          }
-        }
-
-        setUser(loggedUser)
+      const loggedUser = userData ? {
+        id: userData.id,
+        email: userData.email,
+        first_name: userData.first_name || '',
+        last_name: userData.last_name || '',
+        city: userData.city || '',
+        country: userData.country || '',
+        instrument_id: userData.instrument_id || '',
+        music_genre: userData.music_genre || '',
+        bio: userData.bio || '',
+        avatar_url: userData.avatar_url || '',
+        created_at: userData.created_at,
+      } : {
+        id: data.user.id,
+        email: data.user.email || email,
+        first_name: '',
+        last_name: '',
+        city: '',
+        country: '',
+        instrument_id: '',
+        music_genre: '',
+        bio: '',
+        avatar_url: '',
+        created_at: new Date().toISOString(),
       }
-    } catch (error) {
-      console.error('Error en login:', error)
-      throw error
+
+      setUser(loggedUser)
     }
   }
 
