@@ -46,82 +46,41 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const initSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-
-      if (session?.user) {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .maybeSingle()
-
-        if (userData) {
-          setUser({
-            id: userData.id,
-            email: userData.email,
-            first_name: userData.first_name || '',
-            last_name: userData.last_name || '',
-            city: userData.city || '',
-            country: userData.country || '',
-            instrument_id: userData.instrument_id || '',
-            music_genre: userData.music_genre || '',
-            bio: userData.bio || '',
-            avatar_url: userData.avatar_url || '',
-            created_at: userData.created_at,
-          })
-        }
-      }
-
-      setLoading(false)
+    const savedUser = localStorage.getItem('user')
+    if (savedUser) {
+      setUser(JSON.parse(savedUser))
     }
+    setLoading(false)
 
-    initSession()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_OUT' || !session) {
-          setUser(null)
-        } else if (event === 'SIGNED_IN' && session?.user) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .maybeSingle()
-
-          if (userData) {
-            setUser({
-              id: userData.id,
-              email: userData.email,
-              first_name: userData.first_name || '',
-              last_name: userData.last_name || '',
-              city: userData.city || '',
-              country: userData.country || '',
-              instrument_id: userData.instrument_id || '',
-              music_genre: userData.music_genre || '',
-              bio: userData.bio || '',
-              avatar_url: userData.avatar_url || '',
-              created_at: userData.created_at,
-            })
-          }
-        }
+    const { data: { subscription } } = supabase!.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+        localStorage.removeItem('user')
       }
-    )
+    })
 
     return () => subscription.unsubscribe()
   }, [])
 
   const signUp = async (email: string, password: string, userData?: Partial<User>) => {
     try {
-      const { data, error } = await supabase.auth.signUp({
+      console.log("📝 Registrando usuario:", email)
+      
+      const { data, error } = await supabase!.auth.signUp({
         email,
         password,
       })
 
-      if (error) throw error
+      if (error) {
+        console.error("❌ Error en signUp:", error)
+        throw error
+      }
+
+      console.log("✅ Usuario creado en auth:", data.user)
 
       if (data.user) {
-        const { error: dbError } = await supabase
+        // Insertar en la tabla users
+        const { error: dbError } = await supabase!
           .from('users')
           .insert({
             id: data.user.id,
@@ -135,7 +94,12 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
             bio: userData?.bio || null,
           })
 
-        if (dbError) throw dbError
+        if (dbError) {
+          console.error("❌ Error insertando en users:", dbError)
+          throw dbError
+        }
+
+        console.log("✅ Usuario insertado en users")
 
         const newUser = {
           id: data.user.id,
@@ -150,62 +114,60 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         setUser(newUser)
+        localStorage.setItem('user', JSON.stringify(newUser))
       }
     } catch (error) {
-      console.error('Error en registro:', error)
+      console.error('❌ Error en registro:', error)
       throw error
     }
   }
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    try {
+      const { data, error } = await supabase!.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-    if (error) throw error
+      if (error) throw error
 
-    if (data.user) {
-      const { data: userData } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', data.user.id)
-        .maybeSingle()
+      if (data.user) {
+        const { data: userData, error: dbError } = await supabase!
+          .from('users')
+          .select('*')
+          .eq('id', data.user.id)
+          .single()
 
-      const loggedUser = userData ? {
-        id: userData.id,
-        email: userData.email,
-        first_name: userData.first_name || '',
-        last_name: userData.last_name || '',
-        city: userData.city || '',
-        country: userData.country || '',
-        instrument_id: userData.instrument_id || '',
-        music_genre: userData.music_genre || '',
-        bio: userData.bio || '',
-        avatar_url: userData.avatar_url || '',
-        created_at: userData.created_at,
-      } : {
-        id: data.user.id,
-        email: data.user.email || email,
-        first_name: '',
-        last_name: '',
-        city: '',
-        country: '',
-        instrument_id: '',
-        music_genre: '',
-        bio: '',
-        avatar_url: '',
-        created_at: new Date().toISOString(),
+        if (dbError) throw dbError
+
+        const loggedUser = {
+          id: userData.id,
+          email: userData.email,
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+          city: userData.city || '',
+          country: userData.country || '',
+          instrument_id: userData.instrument_id || '',
+          music_genre: userData.music_genre || '',
+          bio: userData.bio || '',
+          avatar_url: userData.avatar_url || '',
+          created_at: userData.created_at,
+        }
+
+        setUser(loggedUser)
+        localStorage.setItem('user', JSON.stringify(loggedUser))
       }
-
-      setUser(loggedUser)
+    } catch (error) {
+      console.error('Error en login:', error)
+      throw error
     }
   }
 
   const signOut = async () => {
     try {
-      await supabase.auth.signOut()
+      await supabase!.auth.signOut()
       setUser(null)
+      localStorage.removeItem('user')
     } catch (error) {
       console.error('Error al cerrar sesión:', error)
     }
