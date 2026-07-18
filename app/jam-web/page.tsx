@@ -44,7 +44,6 @@ export default function JamWebPage() {
   const channelRef = useRef<any>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
 
-  // Generar ID de sala
   const generateRoomId = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase()
   }
@@ -64,22 +63,18 @@ export default function JamWebPage() {
     }
   }
 
-  // 🎵 TEST: Escuchar el audio local en el navegador
   const testLocalAudio = () => {
     if (localStreamRef.current) {
       try {
-        // Crear un contexto de audio para monitorizar
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
         audioContextRef.current = audioContext
         
         const source = audioContext.createMediaStreamSource(localStreamRef.current)
         const analyser = audioContext.createAnalyser()
         source.connect(analyser)
-        
-        // Conectar a la salida para escuchar
         source.connect(audioContext.destination)
         
-        setAudioTest("✅ Escuchando tu micrófono en el navegador")
+        setAudioTest("✅ Escuchando tu micrófono")
         addMessage("Sistema", "🔊 Monitorización de audio activada. ¡Habla para probar!")
         
         console.log('🎤 Monitorización de audio activada')
@@ -92,7 +87,6 @@ export default function JamWebPage() {
     }
   }
 
-  // 🎵 Iniciar audio
   const startLocalStream = async () => {
     try {
       const constraints: MediaStreamConstraints = {
@@ -118,7 +112,6 @@ export default function JamWebPage() {
       setIsConnected(true)
       addMessage("Sistema", "🎤 Micrófono conectado")
       
-      // Activar monitorización automática
       setTimeout(() => {
         testLocalAudio()
       }, 500)
@@ -129,7 +122,8 @@ export default function JamWebPage() {
       
     } catch (error) {
       console.error('Error al acceder al micrófono:', error)
-      setAudioTest("❌ Error: " + error.message)
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido'
+      setAudioTest("❌ Error: " + errorMessage)
       addMessage("Sistema", "❌ No se pudo acceder al micrófono. Permite el acceso en tu navegador.")
     }
   }
@@ -509,7 +503,6 @@ export default function JamWebPage() {
 
   return (
     <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
-      {/* Cabecera */}
       <div style={{
         display: "flex",
         justifyContent: "space-between",
@@ -615,7 +608,6 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      {/* Video local */}
       <div style={{
         marginBottom: 16,
         background: "rgba(255,255,255,0.03)",
@@ -663,7 +655,6 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      {/* Participantes remotos */}
       {participants.filter(p => p.id !== user?.id && p.id !== 'local').length > 0 && (
         <div style={{
           display: "grid",
@@ -706,7 +697,6 @@ export default function JamWebPage() {
         </div>
       )}
 
-      {/* Chat */}
       <div style={{
         display: "flex",
         flexDirection: "column",
