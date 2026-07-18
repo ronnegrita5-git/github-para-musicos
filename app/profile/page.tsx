@@ -20,24 +20,28 @@ export default function ProfilePage() {
   const [instrumentId, setInstrumentId] = useState("")
   const [musicGenre, setMusicGenre] = useState("")
   const [bio, setBio] = useState("")
-  const [skillLevel, setSkillLevel] = useState("")
-  const [yearsExperience, setYearsExperience] = useState<number | "">("")
-  const [availability, setAvailability] = useState("")
   const [instruments, setInstruments] = useState<Instrument[]>([])
   const [loadingInstruments, setLoadingInstruments] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [messageType, setMessageType] = useState<"success" | "error" | null>(null)
 
+  // Cargar instrumentos
   useEffect(() => {
     const fetchInstruments = async () => {
       try {
+        console.log("📡 Cargando instrumentos...")
         const { data, error } = await supabase
           .from("instruments")
           .select("id, name, category")
           .order("name", { ascending: true })
 
-        if (error) throw error
+        if (error) {
+          console.error("❌ Error cargando instrumentos:", error)
+          throw error
+        }
+        
+        console.log("✅ Instrumentos cargados:", data)
         setInstruments(data || [])
       } catch (error) {
         console.error("Error cargando instrumentos:", error)
@@ -49,6 +53,7 @@ export default function ProfilePage() {
     fetchInstruments()
   }, [])
 
+  // Cargar datos del usuario
   useEffect(() => {
     if (user) {
       const loadUserData = async () => {
@@ -69,9 +74,6 @@ export default function ProfilePage() {
             setInstrumentId(data.instrument_id || "")
             setMusicGenre(data.music_genre || "")
             setBio(data.bio || "")
-            setSkillLevel(data.skill_level || "")
-            setYearsExperience(data.years_experience || "")
-            setAvailability(data.availability || "")
           }
         } catch (error) {
           console.error("Error cargando perfil:", error)
@@ -100,9 +102,6 @@ export default function ProfilePage() {
           instrument_id: instrumentId || null,
           music_genre: musicGenre || null,
           bio: bio || null,
-          skill_level: skillLevel || null,
-          years_experience: yearsExperience || null,
-          availability: availability || null,
         })
         .eq("id", user.id)
 
@@ -307,124 +306,14 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-            <div style={{ marginBottom: 16, textAlign: "left" }}>
-              <label style={{ display: "block", marginBottom: 6, color: "#9ca3af" }}>
-                Instrumento que tocas
-              </label>
-              <select
-                value={instrumentId}
-                onChange={(e) => setInstrumentId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #333",
-                  background: "#1a1a1a",
-                  color: "white",
-                  fontSize: 16
-                }}
-              >
-                <option value="">Selecciona un instrumento</option>
-                {loadingInstruments ? (
-                  <option disabled>Cargando instrumentos...</option>
-                ) : (
-                  instruments.map((inst) => (
-                    <option key={inst.id} value={inst.id}>
-                      {inst.name} {inst.category ? `(${inst.category})` : ""}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-
-            <div style={{ marginBottom: 16, textAlign: "left" }}>
-              <label style={{ display: "block", marginBottom: 6, color: "#9ca3af" }}>
-                Género musical
-              </label>
-              <select
-                value={musicGenre}
-                onChange={(e) => setMusicGenre(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #333",
-                  background: "#1a1a1a",
-                  color: "white",
-                  fontSize: 16
-                }}
-              >
-                <option value="">Selecciona un género</option>
-                <option value="banda">🎺 Banda</option>
-                <option value="cuerda">🎻 Música de cuerda</option>
-                <option value="pop-rock">🎸 Pop-Rock</option>
-                <option value="clasica">🎼 Clásica</option>
-                <option value="jazz">🎷 Jazz</option>
-                <option value="electronica">🪩 Electrónica</option>
-                <option value="folk">🪕 Folk</option>
-                <option value="otro">🎵 Otro</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-            <div style={{ marginBottom: 16, textAlign: "left" }}>
-              <label style={{ display: "block", marginBottom: 6, color: "#9ca3af" }}>
-                Nivel
-              </label>
-              <select
-                value={skillLevel}
-                onChange={(e) => setSkillLevel(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #333",
-                  background: "#1a1a1a",
-                  color: "white",
-                  fontSize: 16
-                }}
-              >
-                <option value="">Selecciona tu nivel</option>
-                <option value="principiante">🎵 Principiante</option>
-                <option value="intermedio">🎵 Intermedio</option>
-                <option value="avanzado">🎵 Avanzado</option>
-                <option value="profesional">🎵 Profesional</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: 16, textAlign: "left" }}>
-              <label style={{ display: "block", marginBottom: 6, color: "#9ca3af" }}>
-                Años de experiencia
-              </label>
-              <input
-                type="number"
-                value={yearsExperience}
-                onChange={(e) => setYearsExperience(e.target.value ? parseInt(e.target.value) : "")}
-                placeholder="Años"
-                min="0"
-                max="99"
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #333",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "white",
-                  fontSize: 16
-                }}
-              />
-            </div>
-          </div>
-
+          {/* 🎸 DESPLEGABLE DE INSTRUMENTOS */}
           <div style={{ marginBottom: 16, textAlign: "left" }}>
             <label style={{ display: "block", marginBottom: 6, color: "#9ca3af" }}>
-              Disponibilidad
+              Instrumento que tocas
             </label>
             <select
-              value={availability}
-              onChange={(e) => setAvailability(e.target.value)}
+              value={instrumentId}
+              onChange={(e) => setInstrumentId(e.target.value)}
               style={{
                 width: "100%",
                 padding: "10px 14px",
@@ -435,10 +324,47 @@ export default function ProfilePage() {
                 fontSize: 16
               }}
             >
-              <option value="">Selecciona tu disponibilidad</option>
-              <option value="disponible">✅ Disponible para colaborar</option>
-              <option value="ocasional">🔄 Ocasionalmente</option>
-              <option value="no disponible">❌ No disponible</option>
+              <option value="">Selecciona un instrumento</option>
+              {loadingInstruments ? (
+                <option disabled>⏳ Cargando instrumentos...</option>
+              ) : instruments.length === 0 ? (
+                <option disabled>❌ No hay instrumentos disponibles</option>
+              ) : (
+                instruments.map((inst) => (
+                  <option key={inst.id} value={inst.id}>
+                    {inst.name} {inst.category ? `(${inst.category})` : ""}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+
+          <div style={{ marginBottom: 16, textAlign: "left" }}>
+            <label style={{ display: "block", marginBottom: 6, color: "#9ca3af" }}>
+              Género musical
+            </label>
+            <select
+              value={musicGenre}
+              onChange={(e) => setMusicGenre(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 14px",
+                borderRadius: 8,
+                border: "1px solid #333",
+                background: "#1a1a1a",
+                color: "white",
+                fontSize: 16
+              }}
+            >
+              <option value="">Selecciona un género</option>
+              <option value="banda">🎺 Banda</option>
+              <option value="cuerda">🎻 Música de cuerda</option>
+              <option value="pop-rock">🎸 Pop-Rock</option>
+              <option value="clasica">🎼 Clásica</option>
+              <option value="jazz">🎷 Jazz</option>
+              <option value="electronica">🪩 Electrónica</option>
+              <option value="folk">🪕 Folk</option>
+              <option value="otro">🎵 Otro</option>
             </select>
           </div>
 
