@@ -16,10 +16,14 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
   const [recordingTime, setRecordingTime] = useState(0)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [audioLevel, setAudioLevel] = useState(0)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
 
   const startRecording = async () => {
     if (!user) {
@@ -28,23 +32,90 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
     }
 
     setError(null)
+    setAudioUrl(null)
+    audioChunksRef.current = []
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
+      // ✅ Solicitar micrófono con configuración óptima
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 44100,
+          channelCount: 1,
+        }
+      })
+      
+      streamRef.current = stream
+
+      // ✅ Crear analizador de audio para visualizar el nivel
+      const audioContext = new AudioContext()
+      audioContextRef.current = audioContext
+      const source = audioContext.createMediaStreamSource(stream)
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      analyserRef.current = analyser
+
+      // ✅ Medir el nivel de audio
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const checkAudioLevel = () => {
+        if (isRecording) {
+          analyser.getByteFrequencyData(dataArray)
+          let sum = 0
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i]
+          }
+          const average = sum / dataArray.length
+          setAudioLevel(average / 255)
+          requestAnimationFrame(checkAudioLevel)
+        }
+      }
+
+      // ✅ Crear MediaRecorder con formato óptimo
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 128000
+      })
+      
       mediaRecorderRef.current = mediaRecorder
-      audioChunksRef.current = []
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data)
+          console.log(`📦 Chunk de audio: ${event.data.size} bytes`)
         }
       }
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" })
+        console.log(`⏹ Grabación detenida. Chunks: ${audioChunksRef.current.length}`)
+        
+        if (audioChunksRef.current.length === 0) {
+          setError("No se capturó audio. Verifica tu micrófono.")
+          return
+        }
+
+        // ✅ Crear blob con el formato correcto
+        const audioBlob = new Blob(audioChunksRef.current, { 
+          type: 'audio/webm;codecs=opus' 
+        })
+        
+        console.log(`🎵 Blob de audio creado: ${audioBlob.size} bytes`)
+        
+        if (audioBlob.size < 1000) {
+          setError("El audio grabado es demasiado pequeño. ¿Hablaste?")
+          return
+        }
+
         const url = URL.createObjectURL(audioBlob)
         setAudioUrl(url)
-        stream.getTracks().forEach(track => track.stop())
+        
+        // ✅ Detener el stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop())
+          streamRef.current = null
+        }
 
         if (projectId && user) {
           await uploadAudio(audioBlob)
@@ -55,36 +126,49 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         }
       }
 
-      mediaRecorder.start()
+      // ✅ Iniciar grabación
+      mediaRecorder.start(1000) // Grabar en chunks de 1 segundo
       setIsRecording(true)
       setRecordingTime(0)
+      setAudioLevel(0)
+      
+      // ✅ Iniciar medición de nivel
+      checkAudioLevel()
 
       timerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1)
       }, 1000)
+
+      console.log('🎤 Grabación iniciada')
+
     } catch (error) {
       console.error("Error al acceder al micrófono:", error)
-      setError("No se pudo acceder al micrófono")
-      alert("No se pudo acceder al micrófono")
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido'
+      setError(`No se pudo acceder al micrófono: ${errorMessage}`)
+      alert(`Error: ${errorMessage}. Permite el acceso al micrófono en tu navegador.`)
     }
   }
 
   const uploadAudio = async (blob: Blob) => {
-    if (!user || !projectId) return
+    if (!user || !projectId) {
+      console.error("❌ Faltan datos para subir")
+      return
+    }
     
     setIsUploading(true)
     setError(null)
 
     try {
       const fileName = `${projectId}/recording_${Date.now()}.webm`
-      console.log("📤 Subiendo a:", fileName)
+      console.log(`📤 Subiendo a: ${fileName}, tamaño: ${blob.size} bytes`)
       
       const { error: uploadError } = await supabase
         .storage
         .from("audio")
         .upload(fileName, blob, {
           cacheControl: '3600',
-          upsert: false
+          upsert: false,
+          contentType: 'audio/webm'
         })
 
       if (uploadError) {
@@ -99,9 +183,8 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         .getPublicUrl(fileName)
       
       const audioUrl = urlData.publicUrl
-      console.log("🔊 URL del audio:", audioUrl)
+      console.log(`🔊 URL del audio: ${audioUrl}`)
 
-      // ✅ Guardar solo con campos que existen
       const { error: dbError } = await supabase
         .from("tracks")
         .insert({
@@ -118,7 +201,7 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         throw dbError
       }
 
-      console.log("✅ Grabación guardada")
+      console.log("✅ Grabación guardada correctamente")
       alert("✅ Grabación subida correctamente")
 
     } catch (error) {
@@ -130,12 +213,17 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
   }
 
   const stopRecording = () => {
+    console.log('⏹ Deteniendo grabación...')
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop()
       setIsRecording(false)
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+        audioContextRef.current = null
       }
     }
   }
@@ -217,9 +305,25 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         )}
 
         {isRecording && (
-          <span style={{ color: "#ef4444", fontSize: 16 }}>
-            ⏱ {formatTime(recordingTime)}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{ color: "#ef4444", fontSize: 16 }}>
+              ⏱ {formatTime(recordingTime)}
+            </span>
+            <div style={{
+              width: 60,
+              height: 4,
+              background: "#333",
+              borderRadius: 2,
+              overflow: "hidden"
+            }}>
+              <div style={{
+                width: `${audioLevel * 100}%`,
+                height: "100%",
+                background: audioLevel > 0.1 ? "#10b981" : "#ef4444",
+                transition: "width 0.1s"
+              }} />
+            </div>
+          </div>
         )}
 
         {isUploading && (
