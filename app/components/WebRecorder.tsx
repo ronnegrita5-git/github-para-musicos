@@ -33,20 +33,24 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
     audioChunksRef.current = []
 
     try {
-      // ✅ Solicitar micrófono sin filtros
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        }
-      })
-      
+      // ✅ Solicitar micrófono
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
-      // ✅ Crear MediaRecorder con formato estándar
+      // ✅ Usar el codec que soporte el navegador
+      let mimeType = 'audio/webm'
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus'
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm'
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4'
+      }
+
+      console.log('🎤 Usando codec:', mimeType)
+
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm'
+        mimeType: mimeType
       })
       
       mediaRecorderRef.current = mediaRecorder
@@ -54,36 +58,34 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data)
-          console.log(`📦 Chunk: ${event.data.size} bytes`)
+          console.log(`📦 Chunk recibido: ${event.data.size} bytes`)
         }
       }
 
       mediaRecorder.onstop = async () => {
-        console.log(`⏹ Grabación detenida. Chunks: ${audioChunksRef.current.length}`)
+        console.log(`⏹ Grabación detenida. Total chunks: ${audioChunksRef.current.length}`)
         
         if (audioChunksRef.current.length === 0) {
           setError("No se capturó audio. Verifica tu micrófono.")
           return
         }
 
-        // ✅ Crear blob con formato simple
-        const audioBlob = new Blob(audioChunksRef.current, { 
-          type: 'audio/webm' 
-        })
+        // ✅ Crear blob con el tipo correcto
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+        console.log(`🎵 Blob creado: ${audioBlob.size} bytes, tipo: ${mimeType}`)
         
-        console.log(`🎵 Blob: ${audioBlob.size} bytes`)
-        
+        if (audioBlob.size < 500) {
+          setError("El audio grabado es demasiado pequeño. ¿Hablaste?")
+          return
+        }
+
+        // ✅ Crear URL local para previsualizar
         const url = URL.createObjectURL(audioBlob)
         setAudioUrl(url)
         
-        // ✅ Detener stream
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop())
-          streamRef.current = null
-        }
-
+        // ✅ Si hay projectId, subir a Supabase
         if (projectId && user) {
-          await uploadAudio(audioBlob)
+          await uploadAudio(audioBlob, mimeType)
         }
 
         if (onRecordingComplete) {
@@ -91,8 +93,8 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         }
       }
 
-      // ✅ Grabar en chunks cada 3 segundos
-      mediaRecorder.start(3000)
+      // ✅ Grabar en chunks pequeños para mejor manejo
+      mediaRecorder.start(1000)
       setIsRecording(true)
       setRecordingTime(0)
 
@@ -100,24 +102,30 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         setRecordingTime(prev => prev + 1)
       }, 1000)
 
-      console.log('🎤 Grabación iniciada')
+      console.log('✅ Grabación iniciada con éxito')
 
     } catch (error) {
-      console.error("Error:", error)
+      console.error("❌ Error al acceder al micrófono:", error)
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido'
       setError(`Error: ${errorMessage}`)
     }
   }
 
-  const uploadAudio = async (blob: Blob) => {
+  const uploadAudio = async (blob: Blob, mimeType: string) => {
     if (!user || !projectId) return
     
     setIsUploading(true)
     setError(null)
 
     try {
-      const fileName = `${projectId}/recording_${Date.now()}.webm`
-      console.log(`📤 Subiendo: ${fileName}, ${blob.size} bytes`)
+      // ✅ Determinar extensión según el mimeType
+      let extension = 'webm'
+      if (mimeType.includes('mp4')) extension = 'mp4'
+      else if (mimeType.includes('mp3')) extension = 'mp3'
+      else if (mimeType.includes('wav')) extension = 'wav'
+
+      const fileName = `${projectId}/recording_${Date.now()}.${extension}`
+      console.log(`📤 Subiendo: ${fileName} (${blob.size} bytes)`)
       
       const { error: uploadError } = await supabase
         .storage
@@ -125,7 +133,7 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         .upload(fileName, blob, {
           cacheControl: '3600',
           upsert: false,
-          contentType: 'audio/webm'
+          contentType: mimeType
         })
 
       if (uploadError) {
@@ -134,14 +142,16 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         throw uploadError
       }
 
+      // ✅ Obtener URL pública
       const { data: urlData } = supabase
         .storage
         .from("audio")
         .getPublicUrl(fileName)
       
       const audioUrl = urlData.publicUrl
-      console.log(`🔊 URL: ${audioUrl}`)
+      console.log(`🔊 URL pública: ${audioUrl}`)
 
+      // ✅ Guardar en la tabla tracks
       const { error: dbError } = await supabase
         .from("tracks")
         .insert({
@@ -149,20 +159,21 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
           user_id: user.id,
           name: `Grabación ${new Date().toLocaleString()}`,
           audio_url: audioUrl,
-          source: "recording"
+          source: "recording",
+          type: extension
         })
 
       if (dbError) {
-        console.error("❌ DB Error:", dbError)
-        setError("Error en DB: " + dbError.message)
+        console.error("❌ Error en DB:", dbError)
+        setError("Error al guardar: " + dbError.message)
         throw dbError
       }
 
-      console.log("✅ Grabación guardada")
+      console.log("✅ Grabación guardada correctamente")
       alert("✅ Grabación subida correctamente")
 
     } catch (error) {
-      console.error("❌ Error:", error)
+      console.error("❌ Error en upload:", error)
       setError("Error al procesar la grabación")
     } finally {
       setIsUploading(false)
@@ -170,7 +181,7 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
   }
 
   const stopRecording = () => {
-    console.log('⏹ Deteniendo...')
+    console.log('⏹ Deteniendo grabación...')
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop()
       setIsRecording(false)
@@ -277,7 +288,7 @@ export default function WebRecorder({ projectId, onRecordingComplete }: WebRecor
         {audioUrl && !isRecording && !isUploading && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <audio controls src={audioUrl} style={{ height: 40 }} />
-            <span style={{ color: "#10b981", fontSize: 14 }}>✅ Grabación</span>
+            <span style={{ color: "#10b981", fontSize: 14 }}>✅ Grabación lista</span>
             <button
               onClick={downloadRecording}
               style={{
