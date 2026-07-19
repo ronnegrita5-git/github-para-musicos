@@ -280,7 +280,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           </p>
         </div>
 
-        {/* 🎵 SECCIÓN DE PISTAS */}
         <div style={{ marginTop: 32 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <h2 style={{ fontSize: 24, margin: 0 }}>🎵 Pistas</h2>
