@@ -82,6 +82,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   const [masterVolume, setMasterVolume] = useState(0.8)
   const [trackVolumes, setTrackVolumes] = useState<Record<string, number>>({})
+  // ✅ Guardar el volumen "real" de cada pista (cuando está seleccionada)
+  const [trackRealVolumes, setTrackRealVolumes] = useState<Record<string, number>>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [loopEnabled, setLoopEnabled] = useState(false)
 
@@ -101,10 +103,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       setTracks(data || [])
       
       const volumes: Record<string, number> = {}
+      const realVolumes: Record<string, number> = {}
       data?.forEach(track => {
-        volumes[track.id] = 0.8
+        volumes[track.id] = 0.8 // volumen actual (puede ser 0 si está deseleccionada)
+        realVolumes[track.id] = 0.8 // volumen real (cuando está seleccionada)
       })
       setTrackVolumes(volumes)
+      setTrackRealVolumes(realVolumes)
     } catch (error) {
       console.error("Error cargando pistas:", error)
     } finally {
@@ -171,7 +176,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   }
 
   const playSelectedTracks = async () => {
-    // Detener todo
     stopAllAudio()
     
     if (selectedTracks.size === 0) {
@@ -210,7 +214,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           source.loop = loopEnabled
           
           const gainNode = ctx.createGain()
-          const volume = trackVolumes[track.id] || 0.8
+          // ✅ Usar el volumen actual (puede ser 0 si está deseleccionada)
+          const volume = trackVolumes[track.id] || 0
           gainNode.gain.value = volume
           
           source.connect(gainNode)
@@ -258,9 +263,15 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // ✅ Actualizar volumen de una pista (desde el slider)
   const updateTrackVolume = (trackId: string, value: number) => {
     const newVolume = Math.max(0, Math.min(1, value))
     setTrackVolumes(prev => ({
+      ...prev,
+      [trackId]: newVolume
+    }))
+    // ✅ Guardar el volumen real (para cuando se seleccione)
+    setTrackRealVolumes(prev => ({
       ...prev,
       [trackId]: newVolume
     }))
@@ -271,22 +282,38 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ============ FUNCIONES DE GESTIÓN ============
+  // ✅ Función para silenciar/activar una pista al seleccionar/deseleccionar
   const toggleTrackSelection = (trackId: string) => {
     const newSelected = new Set(selectedTracks)
-    if (newSelected.has(trackId)) {
+    const isSelected = newSelected.has(trackId)
+    
+    if (isSelected) {
+      // ✅ Deseleccionar → volumen a 0
       newSelected.delete(trackId)
-      // Si se deselecciona una pista, detener todo (por simplicidad)
-      if (isPlaying) {
-        stopAllAudio()
+      setTrackVolumes(prev => ({
+        ...prev,
+        [trackId]: 0
+      }))
+      // ✅ Aplicar en tiempo real si está sonando
+      const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
+      if (audioNode) {
+        audioNode.node.gain.value = 0
       }
     } else {
+      // ✅ Seleccionar → restaurar volumen real
       newSelected.add(trackId)
-      // Si se selecciona una pista, detener todo (por simplicidad)
-      if (isPlaying) {
-        stopAllAudio()
+      const realVolume = trackRealVolumes[trackId] || 0.8
+      setTrackVolumes(prev => ({
+        ...prev,
+        [trackId]: realVolume
+      }))
+      // ✅ Aplicar en tiempo real si está sonando
+      const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
+      if (audioNode) {
+        audioNode.node.gain.value = realVolume
       }
     }
+    
     setSelectedTracks(newSelected)
   }
 
@@ -296,6 +323,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
     const allIds = new Set(tracks.map(t => t.id))
     setSelectedTracks(allIds)
+    // ✅ Restaurar volúmenes reales para todas
+    const newVolumes: Record<string, number> = {}
+    tracks.forEach(track => {
+      newVolumes[track.id] = trackRealVolumes[track.id] || 0.8
+    })
+    setTrackVolumes(newVolumes)
   }
 
   const deselectAllTracks = () => {
@@ -303,6 +336,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       stopAllAudio()
     }
     setSelectedTracks(new Set())
+    // ✅ Poner todas las pistas a volumen 0
+    const newVolumes: Record<string, number> = {}
+    tracks.forEach(track => {
+      newVolumes[track.id] = 0
+    })
+    setTrackVolumes(newVolumes)
+    // ✅ Aplicar en tiempo real
+    audioNodesRef.current.forEach(({ node, trackId }) => {
+      node.gain.value = 0
+    })
   }
 
   const deleteTrack = async (trackId: string) => {
@@ -645,7 +688,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                 {tracks.map((track) => {
                   const hasAudio = track.audio_url && track.audio_url.length > 0
                   const isSelected = selectedTracks.has(track.id)
-                  const volume = trackVolumes[track.id] || 0.8
+                  const volume = trackVolumes[track.id] || 0
+                  const realVolume = trackRealVolumes[track.id] || 0.8
                   const instrumentEmoji = track.instrument ? INSTRUMENT_EMOJIS[track.instrument] || '🎵' : '🎵'
 
                   return (
@@ -689,6 +733,15 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                                   borderRadius: 12
                                 }}>
                                   {instrumentEmoji} {track.instrument}
+                                </span>
+                              )}
+                              {!isSelected && volume === 0 && (
+                                <span style={{ 
+                                  fontSize: 10, 
+                                  color: "#6b7280",
+                                  marginLeft: 8
+                                }}>
+                                  🔇 Silenciada
                                 </span>
                               )}
                             </p>
