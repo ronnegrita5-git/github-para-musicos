@@ -80,7 +80,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [forkModalOpen, setForkModalOpen] = useState(false)
   const [isOwner, setIsOwner] = useState<boolean>(false)
   const [parentProject, setParentProject] = useState<any>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   // Estados del mezclador
   const [masterVolume, setMasterVolume] = useState(0.8)
@@ -93,6 +92,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
   const scheduledStopRef = useRef<NodeJS.Timeout | null>(null)
+  const isPlayingRef = useRef(false)
 
   const loadTracks = async () => {
     try {
@@ -178,22 +178,56 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
-  const getTotalDuration = (selectedTracksList: Track[]) => {
-    let maxDuration = 0
-    for (const track of selectedTracksList) {
-      const node = audioNodesRef.current.find(n => n.trackId === track.id)
-      if (node && node.buffer) {
-        const duration = node.buffer.duration
-        if (duration > maxDuration) {
-          maxDuration = duration
-        }
-      }
+  // ✅ Añadir una pista a la reproducción actual
+  const addTrackToPlayback = async (track: Track) => {
+    const ctx = initAudioContext()
+    
+    if (!masterGainRef.current) {
+      masterGainRef.current = ctx.createGain()
+      masterGainRef.current.gain.value = masterVolume
+      masterGainRef.current.connect(ctx.destination)
     }
-    return maxDuration
+
+    try {
+      const response = await fetch(track.audio_url)
+      if (!response.ok) throw new Error(`Error al cargar ${track.name}`)
+      
+      const arrayBuffer = await response.arrayBuffer()
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+      
+      const source = ctx.createBufferSource()
+      source.buffer = audioBuffer
+      source.loop = loopEnabled
+      
+      const gainNode = ctx.createGain()
+      const volume = trackVolumes[track.id] || 0.8
+      gainNode.gain.value = volume
+      
+      source.connect(gainNode)
+      gainNode.connect(masterGainRef.current)
+      
+      audioNodesRef.current.push({
+        node: gainNode,
+        source: source,
+        trackId: track.id,
+        buffer: audioBuffer
+      })
+      
+      source.start(0)
+      isPlayingRef.current = true
+      setIsPlaying(true)
+      
+      if (audioNodesRef.current.length === 1) {
+        setAudioUrl(track.audio_url)
+      }
+      
+    } catch (err) {
+      console.error(`Error al reproducir ${track.name}:`, err)
+    }
   }
 
-  // ✅ Detener una pista específica
-  const stopTrack = (trackId: string) => {
+  // ✅ Quitar una pista de la reproducción
+  const removeTrackFromPlayback = (trackId: string) => {
     const index = audioNodesRef.current.findIndex(n => n.trackId === trackId)
     if (index !== -1) {
       try {
@@ -201,9 +235,9 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       } catch (e) {}
       audioNodesRef.current.splice(index, 1)
       
-      // Si no quedan nodos, actualizar estado
       if (audioNodesRef.current.length === 0) {
         setIsPlaying(false)
+        isPlayingRef.current = false
         setAudioUrl("")
         if (scheduledStopRef.current) {
           clearTimeout(scheduledStopRef.current)
@@ -213,84 +247,62 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  const playSelectedTracks = async () => {
-    stopAllAudio()
+  // ✅ Sincronizar selección con reproducción
+  const syncPlaybackWithSelection = async () => {
+    const currentlyPlaying = new Set(audioNodesRef.current.map(n => n.trackId))
+    const selected = new Set(selectedTracks)
     
-    if (selectedTracks.size === 0) {
-      alert('Selecciona al menos una pista para reproducir')
-      return
+    // Pistas que están sonando pero no deberían (fueron deseleccionadas)
+    const toRemove = new Set([...currentlyPlaying].filter(id => !selected.has(id)))
+    for (const trackId of toRemove) {
+      removeTrackFromPlayback(trackId)
     }
-
-    const ctx = initAudioContext()
     
-    if (!masterGainRef.current) {
-      masterGainRef.current = ctx.createGain()
-      masterGainRef.current.gain.value = masterVolume
-      masterGainRef.current.connect(ctx.destination)
-    }
-
-    const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
-    if (selected.length === 0) {
-      alert('Las pistas seleccionadas no tienen audio disponible')
-      return
-    }
-
-    setIsLoadingAudio(true)
-    audioNodesRef.current = []
-
-    try {
-      for (const track of selected) {
-        try {
-          const response = await fetch(track.audio_url)
-          if (!response.ok) throw new Error(`Error al cargar ${track.name}`)
-          
-          const arrayBuffer = await response.arrayBuffer()
-          const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-          
-          const source = ctx.createBufferSource()
-          source.buffer = audioBuffer
-          source.loop = loopEnabled
-          
-          const gainNode = ctx.createGain()
-          const volume = trackVolumes[track.id] || 0.8
-          gainNode.gain.value = volume
-          
-          source.connect(gainNode)
-          gainNode.connect(masterGainRef.current)
-          
-          audioNodesRef.current.push({
-            node: gainNode,
-            source: source,
-            trackId: track.id,
-            buffer: audioBuffer
-          })
-          
-          source.start(0)
-          
-        } catch (err) {
-          console.error(`Error al reproducir ${track.name}:`, err)
-        }
+    // Pistas que deberían sonar pero no están (fueron seleccionadas)
+    const toAdd = new Set([...selected].filter(id => !currentlyPlaying.has(id)))
+    for (const trackId of toAdd) {
+      const track = tracks.find(t => t.id === trackId)
+      if (track && track.audio_url) {
+        await addTrackToPlayback(track)
       }
-      
+    }
+    
+    // Si no hay pistas sonando, actualizar estado
+    if (audioNodesRef.current.length === 0) {
+      setIsPlaying(false)
+      isPlayingRef.current = false
+      setAudioUrl("")
+    } else {
       setIsPlaying(true)
-      setAudioUrl(selected[0]?.audio_url || "")
-      
-      if (!loopEnabled) {
-        const maxDuration = getTotalDuration(selected)
-        if (scheduledStopRef.current) {
-          clearTimeout(scheduledStopRef.current)
-        }
-        scheduledStopRef.current = setTimeout(() => {
-          stopAllAudio()
-        }, (maxDuration + 0.5) * 1000)
-      }
-      
-    } catch (error) {
-      console.error('Error al reproducir:', error)
-      alert('Error al reproducir las pistas')
-    } finally {
-      setIsLoadingAudio(false)
+      isPlayingRef.current = true
     }
+  }
+
+  // ============ FUNCIONES DE GESTIÓN ============
+  const toggleTrackSelection = async (trackId: string) => {
+    const newSelected = new Set(selectedTracks)
+    if (newSelected.has(trackId)) {
+      newSelected.delete(trackId)
+    } else {
+      newSelected.add(trackId)
+    }
+    setSelectedTracks(newSelected)
+    
+    // ✅ Sincronizar reproducción sin interrumpir
+    await syncPlaybackWithSelection()
+  }
+
+  const selectAllTracks = async () => {
+    const allIds = new Set(tracks.map(t => t.id))
+    setSelectedTracks(allIds)
+    // ✅ Detener todo y reproducir todas
+    stopAllAudio()
+    await syncPlaybackWithSelection()
+  }
+
+  const deselectAllTracks = () => {
+    stopAllAudio()
+    setSelectedTracks(new Set())
   }
 
   const stopAllAudio = () => {
@@ -301,6 +313,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     })
     audioNodesRef.current = []
     setIsPlaying(false)
+    isPlayingRef.current = false
     setAudioUrl("")
     if (scheduledStopRef.current) {
       clearTimeout(scheduledStopRef.current)
@@ -308,58 +321,37 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  const updateMasterVolume = (value: number) => {
-    const newVolume = Math.max(0, Math.min(1, value))
-    setMasterVolume(newVolume)
-    if (masterGainRef.current) {
-      masterGainRef.current.gain.value = newVolume
-    }
-  }
-
-  const updateTrackVolume = (trackId: string, value: number) => {
-    const newVolume = Math.max(0, Math.min(1, value))
-    setTrackVolumes(prev => ({
-      ...prev,
-      [trackId]: newVolume
-    }))
-    
-    const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
-    if (audioNode) {
-      audioNode.node.gain.value = newVolume
-    }
-  }
-
-  // ============ FUNCIONES DE GESTIÓN ============
-  const toggleTrackSelection = (trackId: string) => {
-    const newSelected = new Set(selectedTracks)
-    const wasSelected = newSelected.has(trackId)
-    
-    if (wasSelected) {
-      // ✅ Si la pista está sonando, detenerla
-      stopTrack(trackId)
-      newSelected.delete(trackId)
-    } else {
-      newSelected.add(trackId)
-    }
-    
-    setSelectedTracks(newSelected)
-    
-    // Si no hay pistas seleccionadas, detener todo
-    if (newSelected.size === 0) {
-      stopAllAudio()
-    }
-  }
-
-  const selectAllTracks = () => {
+  const playSelectedTracks = async () => {
+    // Detener todo y comenzar de nuevo
     stopAllAudio()
-    const allIds = new Set(tracks.map(t => t.id))
-    setSelectedTracks(allIds)
+    
+    if (selectedTracks.size === 0) {
+      alert('Selecciona al menos una pista para reproducir')
+      return
+    }
+
+    setIsLoadingAudio(true)
+    const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
+    
+    if (selected.length === 0) {
+      alert('Las pistas seleccionadas no tienen audio disponible')
+      setIsLoadingAudio(false)
+      return
+    }
+
+    try {
+      for (const track of selected) {
+        await addTrackToPlayback(track)
+      }
+    } catch (error) {
+      console.error('Error al reproducir:', error)
+      alert('Error al reproducir las pistas')
+    } finally {
+      setIsLoadingAudio(false)
+    }
   }
 
-  const deselectAllTracks = () => {
-    stopAllAudio()
-    setSelectedTracks(new Set())
-  }
+  // ... (resto de funciones igual: deleteTrack, deleteProject, downloadProject, downloadSingleTrack)
 
   const deleteTrack = async (trackId: string) => {
     if (!user) {
@@ -376,8 +368,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
       if (error) throw error
       await loadTracks()
-      // ✅ Detener la pista si estaba sonando
-      stopTrack(trackId)
       setSelectedTracks(new Set())
       stopAllAudio()
     } catch (error) {
@@ -464,6 +454,27 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     } catch (error) {
       console.error('Error descargando pista:', error)
       alert('Error al descargar la pista')
+    }
+  }
+
+  const updateMasterVolume = (value: number) => {
+    const newVolume = Math.max(0, Math.min(1, value))
+    setMasterVolume(newVolume)
+    if (masterGainRef.current) {
+      masterGainRef.current.gain.value = newVolume
+    }
+  }
+
+  const updateTrackVolume = (trackId: string, value: number) => {
+    const newVolume = Math.max(0, Math.min(1, value))
+    setTrackVolumes(prev => ({
+      ...prev,
+      [trackId]: newVolume
+    }))
+    
+    const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
+    if (audioNode) {
+      audioNode.node.gain.value = newVolume
     }
   }
 
