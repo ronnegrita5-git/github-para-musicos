@@ -89,6 +89,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
+  const audioCacheRef = useRef<Record<string, AudioBuffer>>({})
 
   const loadTracks = async () => {
     try {
@@ -174,8 +175,30 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
-  // ✅ Añadir UNA pista (sin detener las demás)
-  const addTrackToPlayback = async (track: Track) => {
+  // ✅ Cargar audio en caché
+  const loadAudioBuffer = async (trackId: string, audioUrl: string): Promise<AudioBuffer | null> => {
+    if (audioCacheRef.current[trackId]) {
+      return audioCacheRef.current[trackId]
+    }
+
+    try {
+      const response = await fetch(audioUrl)
+      if (!response.ok) throw new Error(`Error al cargar ${audioUrl}`)
+      
+      const arrayBuffer = await response.arrayBuffer()
+      const ctx = initAudioContext()
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+      
+      audioCacheRef.current[trackId] = audioBuffer
+      return audioBuffer
+    } catch (err) {
+      console.error('Error cargando audio:', err)
+      return null
+    }
+  }
+
+  // ✅ Reproducir UNA pista
+  const playTrack = async (track: Track) => {
     const ctx = initAudioContext()
     
     if (!masterGainRef.current) {
@@ -184,51 +207,44 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       masterGainRef.current.connect(ctx.destination)
     }
 
-    try {
-      const response = await fetch(track.audio_url)
-      if (!response.ok) throw new Error(`Error al cargar ${track.name}`)
-      
-      const arrayBuffer = await response.arrayBuffer()
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
-      
-      const source = ctx.createBufferSource()
-      source.buffer = audioBuffer
-      source.loop = loopEnabled
-      
-      const gainNode = ctx.createGain()
-      const volume = trackVolumes[track.id] || 0
-      gainNode.gain.value = volume
-      
-      source.connect(gainNode)
-      gainNode.connect(masterGainRef.current)
-      
-      audioNodesRef.current.push({
-        node: gainNode,
-        source: source,
-        trackId: track.id,
-        buffer: audioBuffer
-      })
-      
-      // ✅ Cuando termine, eliminarla
-      source.onended = () => {
-        const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
-        if (index !== -1) {
-          audioNodesRef.current.splice(index, 1)
-          if (audioNodesRef.current.length === 0) {
-            setIsPlaying(false)
-          }
+    const audioBuffer = await loadAudioBuffer(track.id, track.audio_url)
+    if (!audioBuffer) return
+
+    const source = ctx.createBufferSource()
+    source.buffer = audioBuffer
+    source.loop = loopEnabled
+    
+    const gainNode = ctx.createGain()
+    // ✅ Usar el volumen actual (puede ser 0 si está deseleccionada)
+    const volume = trackVolumes[track.id] || 0
+    gainNode.gain.value = volume
+    
+    source.connect(gainNode)
+    gainNode.connect(masterGainRef.current)
+    
+    audioNodesRef.current.push({
+      node: gainNode,
+      source: source,
+      trackId: track.id,
+      buffer: audioBuffer
+    })
+    
+    // ✅ Cuando termine, eliminarla de la lista
+    source.onended = () => {
+      const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
+      if (index !== -1) {
+        audioNodesRef.current.splice(index, 1)
+        if (audioNodesRef.current.length === 0) {
+          setIsPlaying(false)
         }
       }
-      
-      source.start(0)
-      setIsPlaying(true)
-      
-    } catch (err) {
-      console.error(`Error al reproducir ${track.name}:`, err)
     }
+    
+    source.start(0)
+    setIsPlaying(true)
   }
 
-  // ✅ Reproducir TODAS las seleccionadas (detiene y empieza de nuevo)
+  // ✅ Reproducir TODAS las seleccionadas
   const playAllSelectedTracks = async () => {
     stopAllAudio()
     
@@ -247,37 +263,11 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
     try {
       for (const track of selected) {
-        await addTrackToPlayback(track)
+        await playTrack(track)
       }
     } catch (error) {
       console.error('Error al reproducir:', error)
       alert('Error al reproducir las pistas')
-    } finally {
-      setIsLoadingAudio(false)
-    }
-  }
-
-  // ✅ Reproducir SOLO las pistas que faltan (sin detener)
-  const playMissingTracks = async () => {
-    const currentlyPlaying = new Set(audioNodesRef.current.map(n => n.trackId))
-    const selected = new Set(selectedTracks)
-    
-    // Pistas seleccionadas que NO están sonando
-    const missing = [...selected].filter(id => !currentlyPlaying.has(id))
-    
-    if (missing.length === 0) return
-
-    setIsLoadingAudio(true)
-
-    try {
-      for (const trackId of missing) {
-        const track = tracks.find(t => t.id === trackId)
-        if (track && track.audio_url) {
-          await addTrackToPlayback(track)
-        }
-      }
-    } catch (error) {
-      console.error('Error al añadir pistas:', error)
     } finally {
       setIsLoadingAudio(false)
     }
@@ -318,24 +308,27 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ✅ Seleccionar/Deseleccionar pista
+  // ✅ Seleccionar/Deseleccionar pista (SOLO volumen, no detiene)
   const toggleTrackSelection = async (trackId: string) => {
     const newSelected = new Set(selectedTracks)
     const isSelected = newSelected.has(trackId)
+    const track = tracks.find(t => t.id === trackId)
     
     if (isSelected) {
-      // Deseleccionar → volumen a 0
+      // ✅ Deseleccionar → volumen a 0
       newSelected.delete(trackId)
       setTrackVolumes(prev => ({
         ...prev,
         [trackId]: 0
       }))
+      
+      // ✅ Aplicar en tiempo real si está sonando
       const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
       if (audioNode) {
         audioNode.node.gain.value = 0
       }
     } else {
-      // Seleccionar → restaurar volumen real
+      // ✅ Seleccionar → restaurar volumen real
       newSelected.add(trackId)
       const realVolume = trackRealVolumes[trackId] || 0.8
       setTrackVolumes(prev => ({
@@ -343,12 +336,19 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         [trackId]: realVolume
       }))
       
-      // ✅ Si ya hay reproducción, añadir esta pista sin interrumpir
-      if (audioNodesRef.current.length > 0) {
-        const track = tracks.find(t => t.id === trackId)
-        if (track && track.audio_url) {
-          await addTrackToPlayback(track)
+      // ✅ Si ya hay reproducción, añadir esta pista (si no está sonando)
+      if (audioNodesRef.current.length > 0 && track && track.audio_url) {
+        // Verificar si ya existe un nodo para esta pista
+        const existingNode = audioNodesRef.current.find(n => n.trackId === trackId)
+        if (!existingNode) {
+          await playTrack(track)
+        } else {
+          // Si existe, solo restaurar el volumen
+          existingNode.node.gain.value = realVolume
         }
+      } else if (track && track.audio_url) {
+        // Si no hay reproducción, empezar con esta pista
+        await playTrack(track)
       }
     }
     
@@ -368,18 +368,27 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     
     // Si ya hay reproducción, añadir las que faltan
     if (audioNodesRef.current.length > 0) {
-      await playMissingTracks()
+      const currentlyPlaying = new Set(audioNodesRef.current.map(n => n.trackId))
+      const missing = [...allIds].filter(id => !currentlyPlaying.has(id))
+      for (const trackId of missing) {
+        const track = tracks.find(t => t.id === trackId)
+        if (track && track.audio_url) {
+          await playTrack(track)
+        }
+      }
     }
   }
 
   const deselectAllTracks = () => {
     setSelectedTracks(new Set())
+    // ✅ Poner todas a volumen 0
     const newVolumes: Record<string, number> = {}
     tracks.forEach(track => {
       newVolumes[track.id] = 0
     })
     setTrackVolumes(newVolumes)
-    audioNodesRef.current.forEach(({ node }) => {
+    // ✅ Aplicar en tiempo real
+    audioNodesRef.current.forEach(({ node, trackId }) => {
       node.gain.value = 0
     })
   }
@@ -398,6 +407,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         .eq("id", trackId)
 
       if (error) throw error
+      delete audioCacheRef.current[trackId]
       await loadTracks()
       setSelectedTracks(new Set())
       stopAllAudio()
@@ -725,8 +735,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                   const hasAudio = track.audio_url && track.audio_url.length > 0
                   const isSelected = selectedTracks.has(track.id)
                   const volume = trackVolumes[track.id] || 0
-                  const realVolume = trackRealVolumes[track.id] || 0.8
                   const instrumentEmoji = track.instrument ? INSTRUMENT_EMOJIS[track.instrument] || '🎵' : '🎵'
+                  const isCurrentlyPlaying = audioNodesRef.current.some(n => n.trackId === track.id)
 
                   return (
                     <div key={track.id} style={{
@@ -769,6 +779,15 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                                   borderRadius: 12
                                 }}>
                                   {instrumentEmoji} {track.instrument}
+                                </span>
+                              )}
+                              {isSelected && isCurrentlyPlaying && (
+                                <span style={{ 
+                                  fontSize: 10, 
+                                  color: "#10b981",
+                                  marginLeft: 8
+                                }}>
+                                  🔊 Sonando
                                 </span>
                               )}
                               {!isSelected && volume === 0 && (
