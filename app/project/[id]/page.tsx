@@ -6,6 +6,7 @@ import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 import MultiUpload from "@/app/components/MultiUpload"
 import WebRecorder from "@/app/components/WebRecorder"
+import ForkModal from "@/app/components/ForkModal"
 
 interface Track {
   id: string
@@ -13,20 +14,44 @@ interface Track {
   audio_url: string
   user_id: string
   created_at: string
+  size?: number
+  duration?: number
+  mime_type?: string
+  is_loop?: boolean
+  loop_repeat?: number
+}
+
+interface Project {
+  id: string
+  name: string
+  description: string
+  user_id: string
+  is_public: boolean
+  license: string
+  parent_project_id: string | null
+  fork_depth: number
+  fork_count: number
+  bpm: number
+  stats: { views: number; stars: number }
+  created_at: string
 }
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
   const { id } = params
   const { user } = useAuth()
-  const [project, setProject] = useState<any>(null)
+  const [project, setProject] = useState<Project | null>(null)
   const [tracks, setTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingTracks, setLoadingTracks] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedTracks, setSelectedTracks] = useState<Set<string>>(new Set())
+  const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(-1)
+  const [audioUrl, setAudioUrl] = useState<string>("")
   const [isPlaying, setIsPlaying] = useState(false)
-  const [volumes, setVolumes] = useState<Record<string, number>>({})
-  const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const [forkModalOpen, setForkModalOpen] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
+  const [parentProject, setParentProject] = useState<any>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const loadTracks = async () => {
     try {
@@ -38,19 +63,47 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
       if (error) throw error
       setTracks(data || [])
-      
-      const defaultVolumes: Record<string, number> = {}
-      data?.forEach((track: Track) => {
-        defaultVolumes[track.id] = 0.8
-      })
-      setVolumes(defaultVolumes)
-      
     } catch (error) {
       console.error("Error cargando pistas:", error)
     } finally {
       setLoadingTracks(false)
     }
   }
+
+  const loadProject = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("id", id)
+        .single()
+
+      if (error) throw error
+      setProject(data)
+      setIsOwner(user && user.id === data.user_id)
+
+      if (data.parent_project_id) {
+        const { data: parentData } = await supabase
+          .from("projects")
+          .select("name, user_id")
+          .eq("id", data.parent_project_id)
+          .single()
+        if (parentData) setParentProject(parentData)
+      }
+    } catch (err) {
+      console.error("Error cargando proyecto:", err)
+      setError("No se pudo cargar el proyecto")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (id) {
+      loadProject()
+      loadTracks()
+    }
+  }, [id])
 
   const deleteTrack = async (trackId: string) => {
     if (!user) {
@@ -69,6 +122,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       await loadTracks()
       setSelectedTracks(new Set())
       setIsPlaying(false)
+      setCurrentTrackIndex(-1)
+      setAudioUrl("")
     } catch (error) {
       console.error("Error eliminando pista:", error)
       alert("Error al eliminar la pista")
@@ -98,94 +153,121 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  useEffect(() => {
-    const fetchProject = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("projects")
-          .select("*")
-          .eq("id", id)
-          .single()
-
-        if (error) throw error
-        setProject(data)
-      } catch (err) {
-        console.error("Error cargando proyecto:", err)
-        setError("No se pudo cargar el proyecto")
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    if (id) {
-      fetchProject()
-      loadTracks()
-    }
-  }, [id])
-
-  // 🎵 Reproducir TODAS las pistas seleccionadas A LA VEZ
-  const playSelectedTracks = () => {
-    const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
-    if (selected.length === 0) {
-      alert("No hay pistas seleccionadas con audio")
-      return
-    }
-
-    // Detener todas las reproducciones
-    audioRefs.current.forEach((audio) => {
-      audio.pause()
-      audio.currentTime = 0
-    })
-
-    setIsPlaying(true)
-
-    // Reproducir todas a la vez
-    selected.forEach((track) => {
-      const audio = audioRefs.current.get(track.id)
-      if (audio) {
-        audio.volume = volumes[track.id] || 0.8
-        audio.play()
-      }
-    })
-  }
-
-  const stopAllTracks = () => {
-    audioRefs.current.forEach((audio) => {
-      audio.pause()
-      audio.currentTime = 0
-    })
-    setIsPlaying(false)
-  }
-
   const toggleTrackSelection = (trackId: string) => {
-    setSelectedTracks(prev => {
-      const newSet = new Set(prev)
-      if (newSet.has(trackId)) {
-        newSet.delete(trackId)
-      } else {
-        newSet.add(trackId)
+    const newSelected = new Set(selectedTracks)
+    if (newSelected.has(trackId)) {
+      newSelected.delete(trackId)
+      if (newSelected.size === 0) {
+        setIsPlaying(false)
+        setCurrentTrackIndex(-1)
+        setAudioUrl("")
+        if (audioRef.current) {
+          audioRef.current.pause()
+          audioRef.current.src = ""
+        }
+        setSelectedTracks(newSelected)
+        return
       }
-      return newSet
-    })
+    } else {
+      newSelected.add(trackId)
+    }
+    setSelectedTracks(newSelected)
+
+    const selected = tracks.filter(t => newSelected.has(t.id) && t.audio_url)
+    if (selected.length > 0) {
+      setCurrentTrackIndex(0)
+      setIsPlaying(true)
+      setAudioUrl(selected[0].audio_url)
+      if (audioRef.current) {
+        audioRef.current.src = selected[0].audio_url
+        audioRef.current.play()
+      }
+    }
   }
 
   const selectAllTracks = () => {
     const audioTracks = tracks.filter(t => t.audio_url && t.audio_url.length > 0)
     const allIds = new Set(audioTracks.map(t => t.id))
     setSelectedTracks(allIds)
+    
+    if (audioTracks.length > 0) {
+      setCurrentTrackIndex(0)
+      setIsPlaying(true)
+      setAudioUrl(audioTracks[0].audio_url)
+      if (audioRef.current) {
+        audioRef.current.src = audioTracks[0].audio_url
+        audioRef.current.play()
+      }
+    }
   }
 
   const deselectAllTracks = () => {
     setSelectedTracks(new Set())
-    stopAllTracks()
+    setIsPlaying(false)
+    setCurrentTrackIndex(-1)
+    setAudioUrl("")
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.src = ""
+    }
   }
 
-  const handleVolumeChange = (trackId: string, value: number) => {
-    setVolumes(prev => ({ ...prev, [trackId]: value }))
-    const audio = audioRefs.current.get(trackId)
-    if (audio) {
-      audio.volume = value
+  const playNextTrack = () => {
+    const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
+    const nextIndex = currentTrackIndex + 1
+    if (nextIndex < selected.length) {
+      setCurrentTrackIndex(nextIndex)
+      setAudioUrl(selected[nextIndex].audio_url)
+      if (audioRef.current) {
+        audioRef.current.src = selected[nextIndex].audio_url
+        audioRef.current.play()
+      }
+    } else {
+      setIsPlaying(false)
+      setCurrentTrackIndex(-1)
+      setAudioUrl("")
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.src = ""
+      }
     }
+  }
+
+  const downloadProject = async () => {
+    if (!user) {
+      alert("⚠️ Debes iniciar sesión para descargar")
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/projects/${id}/download`, {
+        headers: {
+          'x-user-id': user.id
+        }
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Error al preparar descarga')
+      }
+
+      const data = await response.json()
+      
+      for (const track of data.project.tracks) {
+        if (track.downloadUrl) {
+          window.open(track.downloadUrl, '_blank')
+        }
+      }
+
+      alert(`✅ Descargando ${data.project.tracks.length} pistas`)
+    } catch (error) {
+      console.error('Error descargando:', error)
+      alert('Error al descargar el proyecto')
+    }
+  }
+
+  const handleForkCreated = () => {
+    loadProject()
   }
 
   if (loading) {
@@ -201,13 +283,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     )
   }
 
-  const isCreator = user && user.id === project.user_id
   const projectName = typeof project.name === 'string' ? project.name : 'Proyecto sin título'
   const projectDescription = typeof project.description === 'string' ? project.description : 'Sin descripción'
   const projectDate = project.created_at ? new Date(project.created_at).toLocaleDateString() : 'Fecha desconocida'
 
   const audioTracks = tracks.filter(t => t.audio_url && t.audio_url.length > 0)
   const selectedCount = selectedTracks.size
+  const selectedAudioTracks = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white" }}>
@@ -220,56 +302,116 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       <main style={{ flex: 1, padding: "40px", maxWidth: "800px" }}>
         <Link href="/explore" style={{ color: "#10b981", textDecoration: "none" }}>← Volver a proyectos</Link>
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20 }}>
-          <h1 style={{ fontSize: 32, margin: 0 }}>{projectName}</h1>
-          {isCreator && (
-            <button
-              onClick={async () => {
-                if (!confirm(`¿Cambiar el proyecto a ${project.is_public ? 'privado' : 'público'}?`)) return
-                try {
-                  const { error } = await supabase
-                    .from("projects")
-                    .update({ is_public: !project.is_public })
-                    .eq("id", id)
-                    .eq("user_id", user.id)
-                  if (error) throw error
-                  setProject({ ...project, is_public: !project.is_public })
-                } catch (error) {
-                  console.error("Error cambiando visibilidad:", error)
-                  alert("Error al cambiar la visibilidad")
-                }
-              }}
-              style={{
-                padding: "6px 14px",
-                background: project.is_public ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
-                color: project.is_public ? "#10b981" : "#ef4444",
-                border: "1px solid " + (project.is_public ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"),
-                borderRadius: 20,
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: "bold"
-              }}
-            >
-              {project.is_public ? "🌍 Público" : "🔒 Privado"}
-            </button>
-          )}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20, flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <h1 style={{ fontSize: 32, margin: 0 }}>
+              {project.parent_project_id ? "🔀 " : ""}{projectName}
+            </h1>
+            {project.parent_project_id && parentProject && (
+              <p style={{ color: "#fbbf24", fontSize: 14, marginTop: 4 }}>
+                🔀 Fork de: {parentProject.name} (por {parentProject.user_id})
+              </p>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {!isOwner && user && (
+              <button
+                onClick={() => setForkModalOpen(true)}
+                style={{
+                  padding: "8px 16px",
+                  background: "#3b82f6",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: "bold"
+                }}
+              >
+                🔀 Fork
+              </button>
+            )}
+
+            {user && (
+              <button
+                onClick={downloadProject}
+                style={{
+                  padding: "8px 16px",
+                  background: "#8b5cf6",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: "bold"
+                }}
+              >
+                📥 Descargar
+              </button>
+            )}
+
+            {isOwner && (
+              <button
+                onClick={async () => {
+                  if (!confirm(`¿Cambiar el proyecto a ${project.is_public ? 'privado' : 'público'}?`)) return
+                  try {
+                    const { error } = await supabase
+                      .from("projects")
+                      .update({ is_public: !project.is_public })
+                      .eq("id", id)
+                      .eq("user_id", user.id)
+                    if (error) throw error
+                    setProject({ ...project, is_public: !project.is_public })
+                  } catch (error) {
+                    console.error("Error cambiando visibilidad:", error)
+                    alert("Error al cambiar la visibilidad")
+                  }
+                }}
+                style={{
+                  padding: "6px 14px",
+                  background: project.is_public ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
+                  color: project.is_public ? "#10b981" : "#ef4444",
+                  border: "1px solid " + (project.is_public ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"),
+                  borderRadius: 20,
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: "bold"
+                }}
+              >
+                {project.is_public ? "🌍 Público" : "🔒 Privado"}
+              </button>
+            )}
+          </div>
         </div>
 
         <p style={{ color: "#9ca3af", fontSize: 16, marginTop: 8 }}>{projectDescription}</p>
 
         <div style={{ marginTop: 24, padding: 16, background: "rgba(255,255,255,0.05)", borderRadius: 8 }}>
           <p style={{ color: "#6b7280", fontSize: 14 }}>📅 Creado: {projectDate}</p>
-          <p style={{ color: "#6b7280", fontSize: 14 }}>👤 {isCreator ? "Tú eres el creador" : `Creado por: ${project.user_id}`}</p>
+          <p style={{ color: "#6b7280", fontSize: 14 }}>👤 {isOwner ? "Tú eres el creador" : `Creado por: ${project.user_id}`}</p>
           <p style={{ color: "#6b7280", fontSize: 14 }}>
             {project.is_public ? "🌍 Público" : "🔒 Privado"}
           </p>
           <p style={{ color: "#6b7280", fontSize: 14 }}>
             🎵 Pistas: {tracks.length}
           </p>
+          {project.fork_count > 0 && (
+            <p style={{ color: "#6b7280", fontSize: 14 }}>
+              🔀 Forks: {project.fork_count}
+            </p>
+          )}
+          <p style={{ color: "#6b7280", fontSize: 14 }}>
+            📜 Licencia: {project.license || 'All Rights Reserved'}
+          </p>
+          {project.parent_project_id && (
+            <p style={{ color: "#fbbf24", fontSize: 14, marginTop: 4 }}>
+              🔀 Este proyecto es un fork (nivel {project.fork_depth || 1})
+            </p>
+          )}
         </div>
 
         <div style={{ marginTop: 32 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: "8px" }}>
             <h2 style={{ fontSize: 24, margin: 0 }}>🎵 Pistas</h2>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <button
@@ -300,49 +442,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               >
                 Deseleccionar
               </button>
-              {selectedCount > 0 && (
-                <>
-                  <button
-                    onClick={playSelectedTracks}
-                    style={{
-                      padding: "4px 16px",
-                      background: "#10b981",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 4,
-                      cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: "bold"
-                    }}
-                  >
-                    ▶ Reproducir todas ({selectedCount})
-                  </button>
-                  {isPlaying && (
-                    <button
-                      onClick={stopAllTracks}
-                      style={{
-                        padding: "4px 16px",
-                        background: "#ef4444",
-                        color: "white",
-                        border: "none",
-                        borderRadius: 4,
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontWeight: "bold"
-                      }}
-                    >
-                      ⏹ Detener todas
-                    </button>
-                  )}
-                </>
-              )}
               <span style={{ color: "#6b7280", fontSize: 12, alignSelf: "center" }}>
                 {selectedCount} pistas seleccionadas
               </span>
             </div>
           </div>
 
-          {isCreator && (
+          {isOwner && (
             <div style={{ marginBottom: 24 }}>
               <div style={{ marginBottom: 12 }}>
                 <MultiUpload 
@@ -369,61 +475,59 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             <p style={{ color: "#6b7280" }}>Cargando pistas...</p>
           ) : tracks.length === 0 ? (
             <p style={{ color: "#6b7280" }}>
-              {isCreator ? "📭 No hay pistas aún. Sube una pista o graba audio." : "📭 Este proyecto aún no tiene pistas."}
+              {isOwner ? "📭 No hay pistas aún. Sube una pista o graba audio." : "📭 Este proyecto aún no tiene pistas."}
             </p>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {tracks.map((track) => {
-                const audioUrl = track.audio_url
-                const hasAudio = audioUrl && audioUrl.length > 0
-                const isSelected = selectedTracks.has(track.id)
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {tracks.map((track) => {
+                  const audioUrl = track.audio_url
+                  const hasAudio = audioUrl && audioUrl.length > 0
+                  const isSelected = selectedTracks.has(track.id)
+                  const isCurrentTrack = isSelected && currentTrackIndex === selectedAudioTracks.findIndex(t => t.id === track.id)
 
-                return (
-                  <div key={track.id} style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                    padding: "12px 16px",
-                    background: isSelected && isPlaying ? "rgba(16,185,129,0.1)" : isSelected ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
-                    borderRadius: 8,
-                    border: isSelected && isPlaying ? "1px solid rgba(16,185,129,0.4)" : isSelected ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)",
-                    opacity: hasAudio ? 1 : 0.5
-                  }}>
-                    <div style={{
+                  return (
+                    <div key={track.id} style={{
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      width: "100%"
+                      padding: "12px 16px",
+                      background: isCurrentTrack ? "rgba(16,185,129,0.15)" : isSelected ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
+                      borderRadius: 8,
+                      border: isCurrentTrack ? "1px solid rgba(16,185,129,0.4)" : isSelected ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)",
+                      cursor: hasAudio ? "pointer" : "default",
+                      opacity: hasAudio ? 1 : 0.5
+                    }}
+                    onClick={() => {
+                      if (hasAudio) {
+                        toggleTrackSelection(track.id)
+                      }
                     }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1 }}>
-                        <div 
-                          onClick={() => {
-                            if (hasAudio) {
-                              toggleTrackSelection(track.id)
-                            }
-                          }}
-                          style={{
-                            cursor: hasAudio ? "pointer" : "default",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            flex: 1
-                          }}
-                        >
-                          <span style={{ fontSize: 18 }}>
-                            {isSelected ? "☑" : hasAudio ? "☐" : "⛔"}
+                      <div>
+                        <p style={{ margin: 0, color: "white" }}>
+                          {isSelected && "☑ "}
+                          {!isSelected && hasAudio && "☐ "}
+                          {!hasAudio && "⛔ "}
+                          {track.name || "Pista sin nombre"}
+                        </p>
+                        <span style={{ color: "#6b7280", fontSize: 12 }}>
+                          {new Date(track.created_at).toLocaleDateString()}
+                          {track.size && ` · ${(track.size / 1024 / 1024).toFixed(1)} MB`}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        {hasAudio && isSelected && (
+                          <span style={{ color: "#10b981", fontSize: 12 }}>
+                            {isCurrentTrack ? "🔊 Reproduciendo" : "✓ Seleccionada"}
                           </span>
-                          <div>
-                            <p style={{ margin: 0, color: "white" }}>
-                              {isPlaying && isSelected && "🔊 "}
-                              {track.name || "Pista sin nombre"}
-                            </p>
-                            <span style={{ color: "#6b7280", fontSize: 12 }}>
-                              {new Date(track.created_at).toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                        {isCreator && (
+                        )}
+                        {hasAudio && !isSelected && (
+                          <span style={{ color: "#6b7280", fontSize: 12 }}>🎵</span>
+                        )}
+                        {!hasAudio && (
+                          <span style={{ color: "#6b7280", fontSize: 12 }}>Sin audio</span>
+                        )}
+                        {isOwner && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
@@ -444,55 +548,68 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                         )}
                       </div>
                     </div>
-                    
-                    {/* 🎚️ Control de volumen */}
-                    {hasAudio && isSelected && (
-                      <div style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        paddingLeft: "36px"
-                      }}>
-                        <span style={{ color: "#6b7280", fontSize: 11 }}>🔊</span>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.01"
-                          value={volumes[track.id] || 0.8}
-                          onChange={(e) => handleVolumeChange(track.id, parseFloat(e.target.value))}
-                          style={{
-                            width: "100px",
-                            accentColor: "#10b981"
-                          }}
-                        />
-                        <span style={{ color: "#6b7280", fontSize: 11 }}>
-                          {Math.round((volumes[track.id] || 0.8) * 100)}%
-                        </span>
-                      </div>
-                    )}
-                    
-                    {/* 🎵 Reproductor de audio oculto */}
-                    {hasAudio && (
-                      <audio
-                        ref={(el) => {
-                          if (el) {
-                            audioRefs.current.set(track.id, el)
-                          }
-                        }}
-                        src={audioUrl}
-                        style={{ display: "none" }}
-                        preload="metadata"
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+
+              {audioUrl && isPlaying && (
+                <div style={{
+                  marginTop: 20,
+                  padding: "12px 16px",
+                  background: "rgba(255,255,255,0.05)",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  flexWrap: "wrap"
+                }}>
+                  <span style={{ color: "#6b7280", fontSize: 13, minWidth: 100 }}>
+                    {currentTrackIndex >= 0 && isPlaying ? 
+                      selectedAudioTracks[currentTrackIndex]?.name || "Reproduciendo" : 
+                      tracks.find(t => t.audio_url === audioUrl)?.name || "Reproduciendo"}
+                  </span>
+                  <audio
+                    ref={audioRef}
+                    controls
+                    src={audioUrl}
+                    onEnded={playNextTrack}
+                    style={{ flex: 1, minWidth: 200, height: "40px" }}
+                  />
+                  {selectedCount > 0 && isPlaying && currentTrackIndex >= 0 && (
+                    <span style={{ color: "#6b7280", fontSize: 12, minWidth: 50 }}>
+                      {`${currentTrackIndex + 1}/${selectedCount}`}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => {
+                      setIsPlaying(false)
+                      setAudioUrl("")
+                      setCurrentTrackIndex(-1)
+                      if (audioRef.current) {
+                        audioRef.current.pause()
+                        audioRef.current.src = ""
+                      }
+                    }}
+                    style={{
+                      padding: "4px 12px",
+                      background: "rgba(239,68,68,0.15)",
+                      color: "#ef4444",
+                      border: "1px solid rgba(239,68,68,0.3)",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      fontSize: 12
+                    }}
+                  >
+                    Detener
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {isCreator && (
+        {isOwner && (
           <div style={{ marginTop: 24, display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <button
               onClick={deleteProject}
@@ -514,6 +631,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           </div>
         )}
       </main>
+
+      <ForkModal
+        isOpen={forkModalOpen}
+        onClose={() => setForkModalOpen(false)}
+        projectId={project.id}
+        projectName={project.name}
+        tracks={tracks}
+        userId={user?.id || ''}
+        onForkCreated={handleForkCreated}
+      />
     </div>
   )
 }
