@@ -19,6 +19,7 @@ interface Track {
   mime_type?: string
   is_loop?: boolean
   loop_repeat?: number
+  instrument?: string // ✅ NUEVO
 }
 
 interface Project {
@@ -38,11 +39,33 @@ interface Project {
   created_at: string
 }
 
-// ✅ Definición de categorías para mostrar emojis
+// ✅ Emojis por categoría
 const CATEGORY_EMOJIS: Record<string, string> = {
   'viento': '🎷',
   'cuerda': '🎻',
   'moderna': '🎸'
+}
+
+// ✅ Emojis por instrumento
+const INSTRUMENT_EMOJIS: Record<string, string> = {
+  'Trompeta': '🎺',
+  'Saxofón': '🎷',
+  'Trombón': '🎺',
+  'Clarinete': '🎵',
+  'Flauta': '🎵',
+  'Tuba': '🎵',
+  'Violín': '🎻',
+  'Viola': '🎻',
+  'Violonchelo': '🎻',
+  'Contrabajo': '🎻',
+  'Arpa': '🎵',
+  'Piano': '🎹',
+  'Guitarra': '🎸',
+  'Bajo': '🎸',
+  'Batería': '🥁',
+  'Teclado': '🎹',
+  'Voz': '🎤',
+  'Sintetizador': '🎹'
 }
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
@@ -524,7 +547,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             </p>
           )}
           
-          {/* ✅ MOSTRAR CATEGORÍA DEL PROYECTO */}
           {project.category && (
             <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
               <p style={{ color: "#10b981", fontSize: 14 }}>
@@ -532,7 +554,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               </p>
               {project.stats?.instruments && project.stats.instruments.length > 0 && (
                 <p style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>
-                  🎸 <strong>Instrumentos:</strong> {project.stats.instruments.join(', ')}
+                  🎸 <strong>Instrumentos permitidos:</strong> {project.stats.instruments.join(', ')}
                 </p>
               )}
             </div>
@@ -583,6 +605,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               <div style={{ marginBottom: 12 }}>
                 <MultiUpload 
                   projectId={id} 
+                  projectCategory={project.category}
                   onUploadComplete={() => {
                     console.log("🔄 Recargando pistas...")
                     loadTracks()
@@ -614,6 +637,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                   const hasAudio = track.audio_url && track.audio_url.length > 0
                   const isSelected = selectedTracks.has(track.id)
                   const volume = trackVolumes[track.id] || 0.8
+                  const instrumentEmoji = track.instrument ? INSTRUMENT_EMOJIS[track.instrument] || '🎵' : '🎵'
 
                   return (
                     <div key={track.id} style={{
@@ -646,6 +670,18 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                           <div>
                             <p style={{ margin: 0, color: "white", fontWeight: isSelected ? "bold" : "normal" }}>
                               {track.name || "Pista sin nombre"}
+                              {track.instrument && (
+                                <span style={{ 
+                                  fontSize: 12, 
+                                  color: "#10b981",
+                                  marginLeft: 8,
+                                  background: "rgba(16,185,129,0.1)",
+                                  padding: "2px 8px",
+                                  borderRadius: 12
+                                }}>
+                                  {instrumentEmoji} {track.instrument}
+                                </span>
+                              )}
                             </p>
                             <span style={{ color: "#6b7280", fontSize: 12 }}>
                               {new Date(track.created_at).toLocaleDateString()}

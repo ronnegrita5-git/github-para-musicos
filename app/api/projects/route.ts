@@ -1,21 +1,30 @@
 import { NextResponse } from 'next/server';
-import { supabasePublic } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 export async function GET() {
   try {
-    const { data: projects, error } = await supabasePublic
+    console.log('🔍 API /api/projects: Buscando proyectos públicos...');
+    
+    const { data: projects, error } = await supabase
       .from('projects')
       .select('*, tracks(*)')
       .eq('is_public', true)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Error en supabase:', error);
+      return NextResponse.json(
+        { error: error.message, details: 'Error al cargar proyectos' },
+        { status: 500 }
+      );
+    }
 
+    console.log(`✅ ${projects?.length || 0} proyectos encontrados`);
     return NextResponse.json(projects || []);
   } catch (error) {
-    console.error('Error fetching projects:', error);
+    console.error('❌ Error inesperado:', error);
     return NextResponse.json(
-      { error: 'Error al cargar proyectos' },
+      { error: error instanceof Error ? error.message : 'Error desconocido' },
       { status: 500 }
     );
   }
