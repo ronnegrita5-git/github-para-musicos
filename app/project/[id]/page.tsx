@@ -81,7 +81,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       if (error) throw error
       setProject(data)
       
-      // 🔧 FIX: Verificar que user existe antes de comparar
       if (user && user.id === data.user_id) {
         setIsOwner(true)
       } else {
@@ -272,6 +271,31 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
+  const downloadSingleTrack = async (track: Track) => {
+    if (!user) {
+      alert("⚠️ Debes iniciar sesión para descargar")
+      return
+    }
+
+    try {
+      const response = await fetch(track.audio_url)
+      if (!response.ok) throw new Error('Error al descargar')
+      
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = track.name || 'audio.wav'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Error descargando pista:', error)
+      alert('Error al descargar la pista')
+    }
+  }
+
   const handleForkCreated = () => {
     loadProject()
   }
@@ -352,7 +376,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                   fontWeight: "bold"
                 }}
               >
-                📥 Descargar
+                📥 Descargar proyecto
               </button>
             )}
 
@@ -366,11 +390,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                       .update({ is_public: !project.is_public })
                       .eq("id", id)
                       .eq("user_id", user?.id || '')
-                    if (error) throw error
+                    if (error) {
+                      console.error('Error detallado:', error)
+                      alert(`Error: ${error.message}`)
+                      return
+                    }
                     setProject({ ...project, is_public: !project.is_public })
+                    alert(`✅ Proyecto ahora es ${!project.is_public ? 'público' : 'privado'}`)
                   } catch (error) {
                     console.error("Error cambiando visibilidad:", error)
-                    alert("Error al cambiar la visibilidad")
+                    alert("Error al cambiar la visibilidad. Revisa los permisos en Supabase.")
                   }
                 }}
                 style={{
@@ -533,6 +562,29 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                         {!hasAudio && (
                           <span style={{ color: "#6b7280", fontSize: 12 }}>Sin audio</span>
                         )}
+                        
+                        {/* 📥 Botón de descarga individual */}
+                        {user && hasAudio && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              await downloadSingleTrack(track)
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#8b5cf6',
+                              cursor: 'pointer',
+                              fontSize: 16,
+                              padding: '0 4px'
+                            }}
+                            title="Descargar pista"
+                          >
+                            📥
+                          </button>
+                        )}
+
+                        {/* 🗑️ Botón de eliminar pista - SOLO para creador */}
                         {isOwner && (
                           <button
                             onClick={(e) => {
