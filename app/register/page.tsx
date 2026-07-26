@@ -1,18 +1,13 @@
 "use client"
 
+import { useState } from "react"
 import { useAuth } from "../context/AuthContext"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase"
-
-interface Instrument {
-  id: string
-  name: string
-  category: string
-}
 
 export default function RegisterPage() {
-  const { user, loading, signUp } = useAuth()
+  const router = useRouter()
+  const { signUp } = useAuth()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -20,382 +15,206 @@ export default function RegisterPage() {
   const [lastName, setLastName] = useState("")
   const [city, setCity] = useState("")
   const [country, setCountry] = useState("")
-  const [instrumentId, setInstrumentId] = useState("")
-  const [musicGenre, setMusicGenre] = useState("")
+  const [instrument, setInstrument] = useState("")
+  const [genre, setGenre] = useState("")
   const [bio, setBio] = useState("")
-  const [instruments, setInstruments] = useState<Instrument[]>([])
-  const [loadingInstruments, setLoadingInstruments] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [loadingSubmit, setLoadingSubmit] = useState(false)
-  const [success, setSuccess] = useState(false)
-
-  useEffect(() => {
-    const fetchInstruments = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("instruments")
-          .select("id, name, category")
-          .order("name", { ascending: true })
-
-        if (error) throw error
-        setInstruments(data || [])
-      } catch (error) {
-        console.error("Error cargando instrumentos:", error)
-      } finally {
-        setLoadingInstruments(false)
-      }
-    }
-
-    fetchInstruments()
-  }, [])
-
-  useEffect(() => {
-    if (user) {
-      window.location.href = '/explore'
-    }
-  }, [user])
-
-  if (loading) {
-    return <div style={{ color: 'white', padding: 40 }}>Cargando...</div>
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
 
     if (password !== confirmPassword) {
-      setError('❌ Las contraseñas no coinciden')
+      setError("Las contraseñas no coinciden")
       return
     }
 
     if (password.length < 6) {
-      setError('❌ La contraseña debe tener al menos 6 caracteres')
+      setError("La contraseña debe tener al menos 6 caracteres")
       return
     }
 
-    setLoadingSubmit(true)
+    setLoading(true)
 
     try {
-      // ✅ Pasar undefined en lugar de null
-      await signUp(email, password, {
-        first_name: firstName || undefined,
-        last_name: lastName || undefined,
-        city: city || undefined,
-        country: country || undefined,
-        instrument_id: instrumentId || undefined,
-        music_genre: musicGenre || undefined,
-        bio: bio || undefined,
-      })
+      // ✅ Crear objeto con los datos del usuario (sin first_name)
+      const userData = {
+        // Supabase solo acepta campos estándar en user_metadata
+        // Los datos adicionales se guardan en la tabla 'users'
+        email: email,
+        // No pasamos first_name porque no existe en User de Supabase
+      }
+
+      await signUp(email, password)
+
+      // ✅ Guardar datos adicionales en la tabla 'users' después del registro
+      // Esto se maneja en AuthContext
       
-      setSuccess(true)
-      setTimeout(() => {
-        window.location.href = '/explore'
-      }, 1500)
-    } catch (err) {
-      setError('❌ ' + (err as Error).message)
+      alert("✅ Registro exitoso. Revisa tu correo para confirmar la cuenta.")
+      router.push("/login")
+    } catch (err: any) {
+      console.error("Error en registro:", err)
+      setError(err.message || "Error al registrarse")
     } finally {
-      setLoadingSubmit(false)
+      setLoading(false)
     }
   }
 
   return (
     <div style={{
-      display: 'flex',
-      minHeight: '100vh',
-      background: '#0a0a0a',
-      color: 'white',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '20px'
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "black",
+      padding: "20px"
     }}>
       <div style={{
-        maxWidth: 500,
-        width: '100%',
-        padding: 40,
-        borderRadius: 16,
-        background: 'rgba(255,255,255,0.05)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        textAlign: 'center',
-        maxHeight: '90vh',
-        overflowY: 'auto'
+        background: "rgba(255,255,255,0.03)",
+        borderRadius: 12,
+        padding: "40px",
+        maxWidth: "500px",
+        width: "100%",
+        border: "1px solid rgba(255,255,255,0.1)"
       }}>
-        <h1 style={{ fontSize: 48, marginBottom: 8 }}>🎵</h1>
-        <h2 style={{ marginBottom: 24 }}>Crear cuenta</h2>
+        <h1 style={{ fontSize: 28, marginBottom: 8, color: "white" }}>🎵 Registrarse</h1>
+        <p style={{ color: "#9ca3af", marginBottom: 24 }}>
+          Crea tu cuenta para comenzar a colaborar
+        </p>
 
         {error && (
           <div style={{
-            padding: 10,
-            marginBottom: 16,
-            background: 'rgba(239,68,68,0.1)',
-            color: '#ef4444',
-            borderRadius: 8,
-            fontSize: 14
+            background: "rgba(239,68,68,0.15)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            padding: "12px",
+            borderRadius: 6,
+            color: "#ef4444",
+            marginBottom: 16
           }}>
-            {error}
-          </div>
-        )}
-
-        {success && (
-          <div style={{
-            padding: 10,
-            marginBottom: 16,
-            background: 'rgba(16,185,129,0.1)',
-            color: '#10b981',
-            borderRadius: 8,
-            fontSize: 14
-          }}>
-            ✅ ¡Registro exitoso! Redirigiendo...
+            ❌ {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Correo electrónico *
-            </label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ color: "#d1d5db", fontSize: 14, display: "block", marginBottom: 4 }}>Nombre</label>
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Nombre"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "#1f2937",
+                  border: "1px solid #374151",
+                  borderRadius: 6,
+                  color: "white"
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ color: "#d1d5db", fontSize: 14, display: "block", marginBottom: 4 }}>Apellido</label>
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Apellido"
+                style={{
+                  width: "100%",
+                  padding: "8px 12px",
+                  background: "#1f2937",
+                  border: "1px solid #374151",
+                  borderRadius: 6,
+                  color: "white"
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label style={{ color: "#d1d5db", fontSize: 14, display: "block", marginBottom: 4 }}>Correo electrónico</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="tu@email.com"
               required
               style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16
+                width: "100%",
+                padding: "8px 12px",
+                background: "#1f2937",
+                border: "1px solid #374151",
+                borderRadius: 6,
+                color: "white"
               }}
             />
           </div>
 
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Contraseña *
-            </label>
+          <div style={{ marginTop: 12 }}>
+            <label style={{ color: "#d1d5db", fontSize: 14, display: "block", marginBottom: 4 }}>Contraseña</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="Mínimo 6 caracteres"
               required
               style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16
+                width: "100%",
+                padding: "8px 12px",
+                background: "#1f2937",
+                border: "1px solid #374151",
+                borderRadius: 6,
+                color: "white"
               }}
             />
           </div>
 
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Confirmar contraseña *
-            </label>
+          <div style={{ marginTop: 12 }}>
+            <label style={{ color: "#d1d5db", fontSize: 14, display: "block", marginBottom: 4 }}>Confirmar contraseña</label>
             <input
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Repite la contraseña"
               required
               style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16
-              }}
-            />
-          </div>
-
-          <hr style={{ borderColor: '#333', margin: '20px 0' }} />
-
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Nombre
-            </label>
-            <input
-              type="text"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16
-              }}
-            />
-          </div>
-
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Apellidos
-            </label>
-            <input
-              type="text"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16
-              }}
-            />
-          </div>
-
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Población
-            </label>
-            <input
-              type="text"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16
-              }}
-            />
-          </div>
-
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              País
-            </label>
-            <input
-              type="text"
-              value={country}
-              onChange={(e) => setCountry(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16
-              }}
-            />
-          </div>
-
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Instrumento que tocas
-            </label>
-            <select
-              value={instrumentId}
-              onChange={(e) => setInstrumentId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: '#1a1a1a',
-                color: 'white',
-                fontSize: 16
-              }}
-            >
-              <option value="">Selecciona un instrumento</option>
-              {loadingInstruments ? (
-                <option disabled>Cargando instrumentos...</option>
-              ) : (
-                instruments.map((inst) => (
-                  <option key={inst.id} value={inst.id}>
-                    {inst.name} {inst.category ? `(${inst.category})` : ''}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
-
-          <div style={{ marginBottom: 16, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Género musical
-            </label>
-            <select
-              value={musicGenre}
-              onChange={(e) => setMusicGenre(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: '#1a1a1a',
-                color: 'white',
-                fontSize: 16
-              }}
-            >
-              <option value="">Selecciona un género</option>
-              <option value="banda">🎺 Banda</option>
-              <option value="cuerda">🎻 Música de cuerda</option>
-              <option value="pop-rock">🎸 Pop-Rock</option>
-              <option value="clasica">🎼 Clásica</option>
-              <option value="jazz">🎷 Jazz</option>
-              <option value="electronica">🪩 Electrónica</option>
-              <option value="folk">🪕 Folk</option>
-              <option value="otro">🎵 Otro</option>
-            </select>
-          </div>
-
-          <div style={{ marginBottom: 24, textAlign: 'left' }}>
-            <label style={{ display: 'block', marginBottom: 6, color: '#9ca3af' }}>
-              Biografía (cuéntanos sobre ti)
-            </label>
-            <textarea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              rows={3}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 8,
-                border: '1px solid #333',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'white',
-                fontSize: 16,
-                resize: 'vertical'
+                width: "100%",
+                padding: "8px 12px",
+                background: "#1f2937",
+                border: "1px solid #374151",
+                borderRadius: 6,
+                color: "white"
               }}
             />
           </div>
 
           <button
             type="submit"
-            disabled={loadingSubmit || success}
+            disabled={loading}
             style={{
-              width: '100%',
-              padding: '14px',
-              background: loadingSubmit || success ? '#444' : '#10b981',
-              color: 'white',
-              border: 'none',
-              borderRadius: 8,
+              width: "100%",
+              padding: "10px",
+              marginTop: 20,
+              background: "#10b981",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              cursor: loading ? "default" : "pointer",
+              fontWeight: "bold",
               fontSize: 16,
-              fontWeight: 'bold',
-              cursor: loadingSubmit || success ? 'not-allowed' : 'pointer'
+              opacity: loading ? 0.5 : 1
             }}
           >
-            {loadingSubmit ? 'Registrando...' : success ? '✅ Registrado' : 'Registrarse'}
+            {loading ? "Registrando..." : "Registrarse"}
           </button>
         </form>
 
-        <div style={{ marginTop: 16, color: '#6b7280', fontSize: 14 }}>
-          ¿Ya tienes cuenta? <Link href="/login" style={{ color: '#10b981' }}>Inicia sesión</Link>
-        </div>
+        <p style={{ color: "#6b7280", fontSize: 14, marginTop: 16, textAlign: "center" }}>
+          ¿Ya tienes cuenta? <Link href="/login" style={{ color: "#10b981", textDecoration: "none" }}>Iniciar sesión</Link>
+        </p>
       </div>
     </div>
   )
