@@ -86,13 +86,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [masterVolume, setMasterVolume] = useState(0.8)
   const [trackVolumes, setTrackVolumes] = useState<Record<string, number>>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
-  const [loopEnabled, setLoopEnabled] = useState(false) // ✅ NUEVO: loop
+  const [loopEnabled, setLoopEnabled] = useState(false)
 
   // Referencias del mezclador
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
-  const scheduledStopRef = useRef<NodeJS.Timeout | null>(null) // ✅ NUEVO: para loop
+  const scheduledStopRef = useRef<NodeJS.Timeout | null>(null)
 
   const loadTracks = async () => {
     try {
@@ -178,7 +178,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
-  // ✅ Calcular duración total de las pistas seleccionadas
   const getTotalDuration = (selectedTracksList: Track[]) => {
     let maxDuration = 0
     for (const track of selectedTracksList) {
@@ -193,8 +192,28 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return maxDuration
   }
 
+  // ✅ Detener una pista específica
+  const stopTrack = (trackId: string) => {
+    const index = audioNodesRef.current.findIndex(n => n.trackId === trackId)
+    if (index !== -1) {
+      try {
+        audioNodesRef.current[index].source.stop()
+      } catch (e) {}
+      audioNodesRef.current.splice(index, 1)
+      
+      // Si no quedan nodos, actualizar estado
+      if (audioNodesRef.current.length === 0) {
+        setIsPlaying(false)
+        setAudioUrl("")
+        if (scheduledStopRef.current) {
+          clearTimeout(scheduledStopRef.current)
+          scheduledStopRef.current = null
+        }
+      }
+    }
+  }
+
   const playSelectedTracks = async () => {
-    // ✅ Detener todo antes de reproducir
     stopAllAudio()
     
     if (selectedTracks.size === 0) {
@@ -230,7 +249,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           
           const source = ctx.createBufferSource()
           source.buffer = audioBuffer
-          source.loop = loopEnabled // ✅ Aplicar loop si está activado
+          source.loop = loopEnabled
           
           const gainNode = ctx.createGain()
           const volume = trackVolumes[track.id] || 0.8
@@ -256,7 +275,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       setIsPlaying(true)
       setAudioUrl(selected[0]?.audio_url || "")
       
-      // ✅ Si loop está desactivado, programar el stop automático
       if (!loopEnabled) {
         const maxDuration = getTotalDuration(selected)
         if (scheduledStopRef.current) {
@@ -264,7 +282,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         }
         scheduledStopRef.current = setTimeout(() => {
           stopAllAudio()
-        }, (maxDuration + 0.5) * 1000) // Margen de 0.5 segundos
+        }, (maxDuration + 0.5) * 1000)
       }
       
     } catch (error) {
@@ -275,7 +293,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ✅ Detener toda reproducción
   const stopAllAudio = () => {
     audioNodesRef.current.forEach(({ source }) => {
       try {
@@ -315,27 +332,31 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   // ============ FUNCIONES DE GESTIÓN ============
   const toggleTrackSelection = (trackId: string) => {
     const newSelected = new Set(selectedTracks)
-    if (newSelected.has(trackId)) {
+    const wasSelected = newSelected.has(trackId)
+    
+    if (wasSelected) {
+      // ✅ Si la pista está sonando, detenerla
+      stopTrack(trackId)
       newSelected.delete(trackId)
-      // ✅ Si no hay pistas seleccionadas, detener reproducción
-      if (newSelected.size === 0) {
-        stopAllAudio()
-      }
     } else {
       newSelected.add(trackId)
     }
+    
     setSelectedTracks(newSelected)
+    
+    // Si no hay pistas seleccionadas, detener todo
+    if (newSelected.size === 0) {
+      stopAllAudio()
+    }
   }
 
   const selectAllTracks = () => {
-    // ✅ Detener reproducción actual antes de seleccionar todas
     stopAllAudio()
     const allIds = new Set(tracks.map(t => t.id))
     setSelectedTracks(allIds)
   }
 
   const deselectAllTracks = () => {
-    // ✅ Detener reproducción al deseleccionar todas
     stopAllAudio()
     setSelectedTracks(new Set())
   }
@@ -355,6 +376,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
       if (error) throw error
       await loadTracks()
+      // ✅ Detener la pista si estaba sonando
+      stopTrack(trackId)
       setSelectedTracks(new Set())
       stopAllAudio()
     } catch (error) {
@@ -856,7 +879,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                       </button>
                     )}
                     
-                    {/* ✅ BOTÓN DE LOOP */}
                     <button
                       onClick={() => setLoopEnabled(!loopEnabled)}
                       style={{
