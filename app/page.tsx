@@ -29,7 +29,6 @@ export default function Home() {
   const [forkModalOpen, setForkModalOpen] = useState(false)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
 
-  // Cargar proyectos al montar el componente
   useEffect(() => {
     loadProjects()
   }, [])
@@ -86,6 +85,7 @@ export default function Home() {
         <div style={{ padding: "0 8px 16px", fontSize: 20, fontWeight: "bold", color: "#10b981" }}>🎵 Music Collab</div>
         <Link href="/" style={{ padding: "10px 12px", borderRadius: 8, background: "rgba(16,185,129,0.1)", color: "#10b981", textDecoration: "none", display: "block" }}>🏠 Inicio</Link>
         <Link href="/explore" style={{ padding: "10px 12px", borderRadius: 8, color: "#9ca3af", textDecoration: "none", display: "block" }}>🔍 Explorar</Link>
+        <Link href="/jam-web" style={{ padding: "10px 12px", borderRadius: 8, color: "#9ca3af", textDecoration: "none", display: "block" }}>🎸 Jam</Link>
         {user && (
           <>
             <Link href="/dashboard" style={{ padding: "10px 12px", borderRadius: 8, color: "#9ca3af", textDecoration: "none", display: "block" }}>📊 Dashboard</Link>
@@ -99,7 +99,7 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Main Content - igual que antes */}
       <main style={{ flex: 1, padding: "40px", maxWidth: "1200px", margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
           <div>
