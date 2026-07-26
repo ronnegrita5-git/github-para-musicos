@@ -25,21 +25,34 @@ export default function Home() {
   const { user } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [forkModalOpen, setForkModalOpen] = useState(false)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
 
+  // Cargar proyectos al montar el componente
   useEffect(() => {
     loadProjects()
   }, [])
 
   const loadProjects = async () => {
+    setLoading(true)
+    setError(null)
     try {
+      console.log('🔍 Cargando proyectos desde /api/projects...')
       const response = await fetch('/api/projects')
-      if (!response.ok) throw new Error('Error al cargar proyectos')
+      
+      if (!response.ok) {
+        const text = await response.text()
+        console.error('❌ Error response:', text)
+        throw new Error(`Error ${response.status}`)
+      }
+      
       const data = await response.json()
+      console.log(`✅ ${data.length} proyectos cargados`)
       setProjects(data)
     } catch (error) {
-      console.error('Error:', error)
+      console.error('❌ Error:', error)
+      setError(error instanceof Error ? error.message : 'Error al cargar proyectos')
     } finally {
       setLoading(false)
     }
@@ -60,6 +73,7 @@ export default function Home() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "black", color: "white" }}>
+      {/* Sidebar */}
       <aside style={{ 
         width: 240, 
         padding: "24px 16px", 
@@ -85,6 +99,7 @@ export default function Home() {
         </div>
       </aside>
 
+      {/* Main Content */}
       <main style={{ flex: 1, padding: "40px", maxWidth: "1200px", margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
           <div>
@@ -116,7 +131,32 @@ export default function Home() {
 
         {loading ? (
           <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>
-            Cargando proyectos...
+            ⏳ Cargando proyectos...
+          </div>
+        ) : error ? (
+          <div style={{ 
+            textAlign: "center", 
+            padding: 40, 
+            color: "#ef4444",
+            background: "rgba(239,68,68,0.1)",
+            borderRadius: 8,
+            border: "1px solid rgba(239,68,68,0.2)"
+          }}>
+            <p>❌ {error}</p>
+            <button
+              onClick={loadProjects}
+              style={{
+                marginTop: 12,
+                padding: "8px 16px",
+                background: "#10b981",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer"
+              }}
+            >
+              Reintentar
+            </button>
           </div>
         ) : projects.length === 0 ? (
           <div style={{ 
