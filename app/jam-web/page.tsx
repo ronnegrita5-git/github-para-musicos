@@ -17,6 +17,8 @@ interface Participant {
   name: string
   isMuted: boolean
   isVideoEnabled: boolean
+  isOwner: boolean // ✅ Nuevo: indica si es el dueño de la sala
+  volume: number   // ✅ Nuevo: volumen individual
 }
 
 export default function JamWebPage() {
@@ -28,6 +30,7 @@ export default function JamWebPage() {
   const [participants, setParticipants] = useState<Participant[]>([])
   const [isMuted, setIsMuted] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
+  const [hasRecording, setHasRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [isCameraOn, setIsCameraOn] = useState(false)
   const [myName, setMyName] = useState("")
@@ -35,6 +38,8 @@ export default function JamWebPage() {
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
   const [audioTest, setAudioTest] = useState<string>("")
+  const [masterVolume, setMasterVolume] = useState(0.8) // ✅ Nuevo: volumen master
+  const [isOwner, setIsOwner] = useState(false) // ✅ Nuevo: si soy el dueño
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -43,6 +48,7 @@ export default function JamWebPage() {
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const channelRef = useRef<any>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const gainNodesRef = useRef<Map<string, GainNode>>(new Map()) // ✅ Para controlar volumen
 
   const generateRoomId = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase()
@@ -128,32 +134,39 @@ export default function JamWebPage() {
     }
   }
 
+  // ✅ Crear sala como dueño
   const createRoom = async () => {
     const newRoomId = generateRoomId()
     setRoomId(newRoomId)
+    setIsOwner(true) // ✅ Soy el dueño
     await startLocalStream()
     setIsInRoom(true)
     setParticipants([{ 
       id: user?.id || 'local', 
       name: myName || user?.email || 'Anónimo',
       isMuted: false,
-      isVideoEnabled: isCameraOn
+      isVideoEnabled: isCameraOn,
+      isOwner: true, // ✅ El creador es dueño
+      volume: 0.8
     }])
-    addMessage("Sistema", `🎵 Sala ${newRoomId} creada. ¡Comparte el código!`)
+    addMessage("Sistema", `👑 ${myName} ha creado la sala ${newRoomId}`)
     subscribeToRoom(newRoomId)
   }
 
   const joinRoom = async () => {
     if (!roomId.trim()) return
+    setIsOwner(false) // ✅ No soy dueño
     await startLocalStream()
     setIsInRoom(true)
     setParticipants([{ 
       id: user?.id || 'local', 
       name: myName || user?.email || 'Anónimo',
       isMuted: false,
-      isVideoEnabled: isCameraOn
+      isVideoEnabled: isCameraOn,
+      isOwner: false,
+      volume: 0.8
     }])
-    addMessage("Sistema", `🎵 Te has unido a la sala ${roomId}`)
+    addMessage("Sistema", `🎵 ${myName} se ha unido a la sala ${roomId}`)
     subscribeToRoom(roomId)
   }
 
@@ -179,7 +192,14 @@ export default function JamWebPage() {
         addMessage("Sistema", `👤 ${payload.name} se ha unido`)
         setParticipants(prev => {
           if (!prev.find(p => p.id === payload.id)) {
-            return [...prev, { id: payload.id, name: payload.name, isMuted: false, isVideoEnabled: false }]
+            return [...prev, { 
+              id: payload.id, 
+              name: payload.name, 
+              isMuted: false, 
+              isVideoEnabled: false,
+              isOwner: false,
+              volume: 0.8
+            }]
           }
           return prev
         })
@@ -190,16 +210,121 @@ export default function JamWebPage() {
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
         setPeerCount(prev => Math.max(0, prev - 1))
       })
+      // ✅ Escuchar eventos de mute del dueño
+      .on('broadcast', { event: 'mute-user' }, ({ payload }) => {
+        if (payload.targetId === user?.id) {
+          const isMuted = payload.muted
+          setIsMuted(isMuted)
+          if (localStreamRef.current) {
+            const audioTrack = localStreamRef.current.getAudioTracks()[0]
+            if (audioTrack) {
+              audioTrack.enabled = !isMuted
+            }
+          }
+          addMessage("Sistema", isMuted ? "🔇 El dueño te ha silenciado" : "🎤 El dueño te ha activado el micrófono")
+        }
+      })
+      // ✅ Escuchar cambios de volumen master
+      .on('broadcast', { event: 'master-volume' }, ({ payload }) => {
+        setMasterVolume(payload.volume)
+        // Aplicar a todos los nodos de ganancia
+        gainNodesRef.current.forEach((gainNode) => {
+          gainNode.gain.value = payload.volume
+        })
+        addMessage("Sistema", `🎚️ El dueño ha cambiado el volumen master a ${Math.round(payload.volume * 100)}%`)
+      })
       .subscribe((status) => {
         console.log('🔊 Canal de señalización:', status)
         if (status === 'SUBSCRIBED') {
           channel.send({
             type: 'broadcast',
             event: 'user-joined',
-            payload: { id: user?.id || 'local', name: myName || 'Anónimo' }
+            payload: { 
+              id: user?.id || 'local', 
+              name: myName || 'Anónimo',
+              isOwner: isOwner
+            }
           })
         }
       })
+  }
+
+  // ✅ Mutear a un usuario (solo dueño)
+  const muteParticipant = (participantId: string, muted: boolean) => {
+    if (!isOwner) {
+      addMessage("Sistema", "⚠️ Solo el dueño de la sala puede mutear usuarios")
+      return
+    }
+
+    const participant = participants.find(p => p.id === participantId)
+    if (!participant) return
+
+    // Actualizar estado local
+    setParticipants(prev => prev.map(p => 
+      p.id === participantId ? { ...p, isMuted: muted } : p
+    ))
+
+    // Enviar evento por broadcast
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'mute-user',
+        payload: {
+          targetId: participantId,
+          muted: muted
+        }
+      })
+    }
+
+    addMessage("Sistema", `🔇 ${participant.name} ha sido ${muted ? 'silenciado' : 'activado'}`)
+  }
+
+  // ✅ Cambiar volumen de un participante (solo dueño)
+  const changeParticipantVolume = (participantId: string, volume: number) => {
+    if (!isOwner) {
+      addMessage("Sistema", "⚠️ Solo el dueño de la sala puede ajustar el volumen")
+      return
+    }
+
+    const newVolume = Math.max(0, Math.min(1, volume))
+    setParticipants(prev => prev.map(p => 
+      p.id === participantId ? { ...p, volume: newVolume } : p
+    ))
+
+    // Aplicar a los nodos de ganancia
+    const gainNode = gainNodesRef.current.get(participantId)
+    if (gainNode) {
+      gainNode.gain.value = newVolume
+    }
+
+    addMessage("Sistema", `🎚️ Volumen de ${participants.find(p => p.id === participantId)?.name} ajustado a ${Math.round(newVolume * 100)}%`)
+  }
+
+  // ✅ Cambiar volumen master (solo dueño)
+  const changeMasterVolume = (volume: number) => {
+    if (!isOwner) {
+      addMessage("Sistema", "⚠️ Solo el dueño puede ajustar el volumen master")
+      return
+    }
+
+    const newVolume = Math.max(0, Math.min(1, volume))
+    setMasterVolume(newVolume)
+
+    // Aplicar a todos los nodos de ganancia
+    gainNodesRef.current.forEach((gainNode) => {
+      gainNode.gain.value = newVolume
+    })
+
+    // Enviar evento por broadcast
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'master-volume',
+        payload: { volume: newVolume }
+      })
+    }
+
+    addMessage("Sistema", `🎚️ Volumen master ajustado a ${Math.round(newVolume * 100)}%`)
   }
 
   const toggleMute = () => {
@@ -238,6 +363,8 @@ export default function JamWebPage() {
     if (!localStreamRef.current) return
     
     recordedChunksRef.current = []
+    setHasRecording(false)
+    
     const mediaRecorder = new MediaRecorder(localStreamRef.current)
     mediaRecorderRef.current = mediaRecorder
     
@@ -248,20 +375,18 @@ export default function JamWebPage() {
     }
     
     mediaRecorder.onstop = () => {
-      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `jam-session-${roomId}-${Date.now()}.webm`
-      a.click()
-      URL.revokeObjectURL(url)
+      if (recordedChunksRef.current.length > 0) {
+        setHasRecording(true)
+        addMessage("Sistema", "💾 Grabación finalizada. Haz clic en 'Descargar grabación' para guardarla.")
+      } else {
+        addMessage("Sistema", "⚠️ No se grabó nada. Intenta de nuevo.")
+      }
       setIsRecording(false)
       setRecordingTime(0)
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
       }
-      addMessage("Sistema", "💾 Grabación guardada")
     }
     
     mediaRecorder.start()
@@ -273,6 +398,22 @@ export default function JamWebPage() {
     }, 1000)
     
     addMessage("Sistema", "🔴 Grabación iniciada")
+  }
+
+  const downloadRecording = () => {
+    if (recordedChunksRef.current.length === 0) {
+      addMessage("Sistema", "⚠️ No hay grabación para descargar")
+      return
+    }
+    
+    const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `jam-session-${roomId}-${Date.now()}.webm`
+    a.click()
+    URL.revokeObjectURL(url)
+    addMessage("Sistema", "💾 Grabación descargada")
   }
 
   const stopRecording = () => {
@@ -331,6 +472,9 @@ export default function JamWebPage() {
       timerRef.current = null
     }
     
+    setHasRecording(false)
+    recordedChunksRef.current = []
+    
     setIsInRoom(false)
     setRoomId("")
     setParticipants([])
@@ -342,6 +486,7 @@ export default function JamWebPage() {
     setIsConnected(false)
     setPeerCount(0)
     setAudioTest("")
+    setIsOwner(false)
   }
 
   if (!user) {
@@ -456,7 +601,7 @@ export default function JamWebPage() {
               marginBottom: 16
             }}
           >
-            🎸 Crear sala
+            🎸 Crear sala (serás el dueño 👑)
           </button>
 
           <div style={{ display: "flex", gap: "8px" }}>
@@ -501,6 +646,88 @@ export default function JamWebPage() {
     )
   }
 
+  // ✅ Lista de participantes con controles (solo para el dueño)
+  const renderParticipants = () => {
+    return participants.map((p) => {
+      const isMe = p.id === user?.id || p.id === 'local'
+      
+      return (
+        <div key={p.id} style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "12px",
+          padding: "8px 12px",
+          background: isMe ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
+          borderRadius: 8,
+          border: isMe ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)"
+        }}>
+          <span style={{ fontSize: 18 }}>
+            {p.isOwner ? "👑" : "🎵"}
+          </span>
+          <span style={{ flex: 1, color: "white", fontWeight: isMe ? "bold" : "normal" }}>
+            {p.name} {isMe && "(tú)"}
+            {p.isMuted && " 🔇"}
+          </span>
+          
+          {/* ✅ Control de volumen individual (solo dueño) */}
+          {isOwner && !isMe && (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontSize: 11, color: "#6b7280", minWidth: "30px" }}>
+                {Math.round(p.volume * 100)}%
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={p.volume}
+                onChange={(e) => {
+                  const volume = parseFloat(e.target.value)
+                  changeParticipantVolume(p.id, volume)
+                }}
+                style={{
+                  width: "80px",
+                  accentColor: "#10b981"
+                }}
+              />
+            </div>
+          )}
+          
+          {/* ✅ Botón de mute (solo dueño, no puede mutearse a sí mismo) */}
+          {isOwner && !isMe && (
+            <button
+              onClick={() => muteParticipant(p.id, !p.isMuted)}
+              style={{
+                padding: "4px 10px",
+                background: p.isMuted ? "#10b981" : "#ef4444",
+                color: "white",
+                border: "none",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontSize: 12
+              }}
+            >
+              {p.isMuted ? "🔊 Activar" : "🔇 Silenciar"}
+            </button>
+          )}
+          
+          {/* Badge de dueño */}
+          {p.isOwner && (
+            <span style={{
+              fontSize: 10,
+              background: "rgba(251,191,36,0.2)",
+              color: "#fbbf24",
+              padding: "2px 8px",
+              borderRadius: 12
+            }}>
+              Dueño
+            </span>
+          )}
+        </div>
+      )
+    })
+  }
+
   return (
     <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
       <div style={{
@@ -520,9 +747,19 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12 }}>
             👥 {participants.length}/5
           </span>
+          {isOwner && (
+            <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>
+              👑 Eres el dueño
+            </span>
+          )}
           {isRecording && (
             <span style={{ color: "#ef4444", marginLeft: 12 }}>
               🔴 {formatTime(recordingTime)}
+            </span>
+          )}
+          {hasRecording && !isRecording && (
+            <span style={{ color: "#10b981", marginLeft: 12 }}>
+              💾 Grabación disponible
             </span>
           )}
           {audioTest && (
@@ -560,6 +797,7 @@ export default function JamWebPage() {
           >
             {isCameraOn ? "📹 Cámara ON" : "📹 Cámara OFF"}
           </button>
+          
           {!isRecording ? (
             <button
               onClick={startRecording}
@@ -580,7 +818,7 @@ export default function JamWebPage() {
               onClick={stopRecording}
               style={{
                 padding: "6px 14px",
-                background: "#6b7280",
+                background: "#f59e0b",
                 color: "white",
                 border: "none",
                 borderRadius: 6,
@@ -588,9 +826,28 @@ export default function JamWebPage() {
                 fontSize: 13
               }}
             >
-              ⏹ Detener
+              ⏹ Detener grabación
             </button>
           )}
+          
+          {hasRecording && !isRecording && (
+            <button
+              onClick={downloadRecording}
+              style={{
+                padding: "6px 14px",
+                background: "#10b981",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: "bold"
+              }}
+            >
+              💾 Descargar grabación
+            </button>
+          )}
+          
           <button
             onClick={leaveRoom}
             style={{
@@ -609,161 +866,188 @@ export default function JamWebPage() {
       </div>
 
       <div style={{
-        marginBottom: 16,
-        background: "rgba(255,255,255,0.03)",
-        borderRadius: 8,
-        overflow: "hidden",
-        border: "1px solid rgba(255,255,255,0.05)",
-        aspectRatio: "16/9",
-        position: "relative"
+        display: "grid",
+        gridTemplateColumns: "2fr 1fr",
+        gap: "16px"
       }}>
-        <video
-          id="localVideo"
-          autoPlay
-          playsInline
-          muted
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            background: "#111"
-          }}
-        />
-        <div style={{
-          position: "absolute",
-          bottom: 8,
-          left: 8,
-          background: "rgba(0,0,0,0.7)",
-          padding: "4px 12px",
-          borderRadius: 12,
-          fontSize: 12,
-          color: "white"
-        }}>
-          {myName} {isMuted ? "🔇" : "🎤"} {isCameraOn ? "📹" : ""}
-        </div>
-        <div style={{
-          position: "absolute",
-          top: 8,
-          right: 8,
-          background: "rgba(0,0,0,0.7)",
-          padding: "4px 12px",
-          borderRadius: 12,
-          fontSize: 11,
-          color: audioTest?.includes("✅") ? "#10b981" : "#6b7280"
-        }}>
-          {audioTest || "🔇"}
-        </div>
-      </div>
-
-      {participants.filter(p => p.id !== user?.id && p.id !== 'local').length > 0 && (
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "12px",
-          marginBottom: 16
-        }}>
-          {participants.filter(p => p.id !== user?.id && p.id !== 'local').map((p) => (
-            <div key={p.id} style={{
-              background: "rgba(255,255,255,0.03)",
-              borderRadius: 8,
-              overflow: "hidden",
-              border: "1px solid rgba(255,255,255,0.05)",
-              aspectRatio: "16/9",
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center"
+        {/* Video principal */}
+        <div>
+          <div style={{
+            marginBottom: 16,
+            background: "rgba(255,255,255,0.03)",
+            borderRadius: 8,
+            overflow: "hidden",
+            border: "1px solid rgba(255,255,255,0.05)",
+            aspectRatio: "16/9",
+            position: "relative"
+          }}>
+            <video
+              id="localVideo"
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                background: "#111"
+              }}
+            />
+            <div style={{
+              position: "absolute",
+              bottom: 8,
+              left: 8,
+              background: "rgba(0,0,0,0.7)",
+              padding: "4px 12px",
+              borderRadius: 12,
+              fontSize: 12,
+              color: "white"
             }}>
-              <div style={{
-                fontSize: 48,
-                color: "#6b7280"
-              }}>
-                🎵
-              </div>
-              <div style={{
-                position: "absolute",
-                bottom: 8,
-                left: 8,
-                background: "rgba(0,0,0,0.7)",
-                padding: "4px 12px",
-                borderRadius: 12,
-                fontSize: 12,
-                color: "white"
-              }}>
-                {p.name}
-              </div>
+              {myName} {isMuted ? "🔇" : "🎤"} {isCameraOn ? "📹" : ""}
+              {isRecording && " 🔴"}
+              {isOwner && " 👑"}
             </div>
-          ))}
-        </div>
-      )}
+            <div style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              background: "rgba(0,0,0,0.7)",
+              padding: "4px 12px",
+              borderRadius: 12,
+              fontSize: 11,
+              color: audioTest?.includes("✅") ? "#10b981" : "#6b7280"
+            }}>
+              {audioTest || "🔇"}
+            </div>
+          </div>
 
-      <div style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "200px",
-        background: "rgba(255,255,255,0.03)",
-        borderRadius: 8,
-        border: "1px solid rgba(255,255,255,0.05)",
-        overflow: "hidden"
-      }}>
+          {/* Lista de participantes con controles */}
+          <div style={{
+            background: "rgba(255,255,255,0.03)",
+            borderRadius: 8,
+            padding: "12px 16px",
+            border: "1px solid rgba(255,255,255,0.05)"
+          }}>
+            <h4 style={{ margin: "0 0 8px 0", color: "#9ca3af", fontSize: 14 }}>
+              👥 Participantes ({participants.length})
+              {isOwner && " - Tienes control sobre el volumen y mute"}
+            </h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              {renderParticipants()}
+            </div>
+          </div>
+        </div>
+
+        {/* Chat */}
         <div style={{
-          flex: 1,
-          padding: "12px 16px",
-          overflowY: "auto",
           display: "flex",
           flexDirection: "column",
-          gap: "4px"
+          height: "500px",
+          background: "rgba(255,255,255,0.03)",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.05)",
+          overflow: "hidden"
         }}>
-          {messages.map((msg) => (
-            <div key={msg.id} style={{
-              padding: "4px 12px",
-              background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
-              borderRadius: 6,
-              fontSize: 14
-            }}>
-              <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>
-                {msg.user === "Sistema" ? "📢 " : msg.user}:
-              </span>
-              <span style={{ color: "white", marginLeft: 4 }}>{msg.text}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{
-          display: "flex",
-          padding: "8px 12px",
-          borderTop: "1px solid rgba(255,255,255,0.05)",
-          gap: "8px"
-        }}>
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyPress={(e) => e.key === "Enter" && sendMessage()}
-            placeholder="Escribe un mensaje..."
-            style={{
-              flex: 1,
+          <div style={{
+            padding: "8px 12px",
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
+          }}>
+            <span style={{ color: "#9ca3af", fontWeight: "bold" }}>💬 Chat</span>
+            {isOwner && (
+              <span style={{ fontSize: 11, color: "#fbbf24" }}>👑 Dueño</span>
+            )}
+          </div>
+          <div style={{
+            flex: 1,
+            padding: "12px 16px",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }}>
+            {messages.map((msg) => (
+              <div key={msg.id} style={{
+                padding: "4px 12px",
+                background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
+                borderRadius: 6,
+                fontSize: 14
+              }}>
+                <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>
+                  {msg.user === "Sistema" ? "📢 " : msg.user}:
+                </span>
+                <span style={{ color: "white", marginLeft: 4 }}>{msg.text}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{
+            display: "flex",
+            padding: "8px 12px",
+            borderTop: "1px solid rgba(255,255,255,0.05)",
+            gap: "8px"
+          }}>
+            <input
+              type="text"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && sendMessage()}
+              placeholder="Escribe un mensaje..."
+              style={{
+                flex: 1,
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "1px solid #333",
+                background: "rgba(255,255,255,0.05)",
+                color: "white",
+                fontSize: 14
+              }}
+            />
+            <button
+              onClick={sendMessage}
+              style={{
+                padding: "8px 16px",
+                background: "#10b981",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontWeight: "bold"
+              }}
+            >
+              Enviar
+            </button>
+          </div>
+          
+          {/* Control de volumen master (solo dueño) */}
+          {isOwner && (
+            <div style={{
               padding: "8px 12px",
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "rgba(255,255,255,0.05)",
-              color: "white",
-              fontSize: 14
-            }}
-          />
-          <button
-            onClick={sendMessage}
-            style={{
-              padding: "8px 16px",
-              background: "#10b981",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontWeight: "bold"
-            }}
-          >
-            Enviar
-          </button>
+              borderTop: "1px solid rgba(255,255,255,0.05)",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px"
+            }}>
+              <span style={{ color: "#9ca3af", fontSize: 13, fontWeight: "bold" }}>🎚️ Master</span>
+              <span style={{ fontSize: 12, color: "#6b7280", minWidth: "35px" }}>
+                {Math.round(masterVolume * 100)}%
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={masterVolume}
+                onChange={(e) => changeMasterVolume(parseFloat(e.target.value))}
+                style={{
+                  flex: 1,
+                  accentColor: "#10b981"
+                }}
+              />
+              <span style={{ fontSize: 14, color: "#9ca3af" }}>🔊</span>
+            </div>
+          )}
         </div>
       </div>
 
