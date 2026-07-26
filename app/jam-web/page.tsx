@@ -17,8 +17,56 @@ interface Participant {
   name: string
   isMuted: boolean
   isVideoEnabled: boolean
-  isOwner: boolean // ✅ Nuevo: indica si es el dueño de la sala
-  volume: number   // ✅ Nuevo: volumen individual
+  isOwner: boolean
+  volume: number
+  instrument: string
+  category: string
+}
+
+// ✅ Definición de categorías e instrumentos (misma que en proyectos)
+const CATEGORIES = {
+  'viento': {
+    name: '🎷 Banda de Viento',
+    emoji: '🎷',
+    instruments: ['Trompeta', 'Saxofón', 'Trombón', 'Clarinete', 'Flauta', 'Tuba']
+  },
+  'cuerda': {
+    name: '🎻 Orquesta de Cámara',
+    emoji: '🎻',
+    instruments: ['Violín', 'Viola', 'Violonchelo', 'Contrabajo', 'Arpa', 'Piano']
+  },
+  'moderna': {
+    name: '🎸 Banda de Rock',
+    emoji: '🎸',
+    instruments: ['Guitarra', 'Bajo', 'Batería', 'Teclado', 'Voz', 'Sintetizador']
+  }
+}
+
+type CategoryKey = keyof typeof CATEGORIES
+
+// ✅ Emoji para instrumentos
+const getInstrumentEmoji = (instrument: string) => {
+  const emojis: Record<string, string> = {
+    'Trompeta': '🎺',
+    'Saxofón': '🎷',
+    'Trombón': '🎺',
+    'Clarinete': '🎵',
+    'Flauta': '🎵',
+    'Tuba': '🎵',
+    'Violín': '🎻',
+    'Viola': '🎻',
+    'Violonchelo': '🎻',
+    'Contrabajo': '🎻',
+    'Arpa': '🎵',
+    'Piano': '🎹',
+    'Guitarra': '🎸',
+    'Bajo': '🎸',
+    'Batería': '🥁',
+    'Teclado': '🎹',
+    'Voz': '🎤',
+    'Sintetizador': '🎹'
+  }
+  return emojis[instrument] || '🎵'
 }
 
 export default function JamWebPage() {
@@ -38,8 +86,12 @@ export default function JamWebPage() {
   const [isConnected, setIsConnected] = useState(false)
   const [peerCount, setPeerCount] = useState(0)
   const [audioTest, setAudioTest] = useState<string>("")
-  const [masterVolume, setMasterVolume] = useState(0.8) // ✅ Nuevo: volumen master
-  const [isOwner, setIsOwner] = useState(false) // ✅ Nuevo: si soy el dueño
+  const [masterVolume, setMasterVolume] = useState(0.8)
+  const [isOwner, setIsOwner] = useState(false)
+  
+  const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
+  const [selectedInstrument, setSelectedInstrument] = useState<string>("")
+  const [roomCategory, setRoomCategory] = useState<string>("")
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -48,18 +100,10 @@ export default function JamWebPage() {
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const channelRef = useRef<any>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
-  const gainNodesRef = useRef<Map<string, GainNode>>(new Map()) // ✅ Para controlar volumen
+  const gainNodesRef = useRef<Map<string, GainNode>>(new Map())
 
   const generateRoomId = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase()
-  }
-
-  const PEER_CONFIG = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-    ]
   }
 
   const setUsername = () => {
@@ -76,14 +120,10 @@ export default function JamWebPage() {
         audioContextRef.current = audioContext
         
         const source = audioContext.createMediaStreamSource(localStreamRef.current)
-        const analyser = audioContext.createAnalyser()
-        source.connect(analyser)
         source.connect(audioContext.destination)
         
         setAudioTest("✅ Escuchando tu micrófono")
         addMessage("Sistema", "🔊 Monitorización de audio activada. ¡Habla para probar!")
-        
-        console.log('🎤 Monitorización de audio activada')
       } catch (error) {
         console.error('Error en monitorización:', error)
         setAudioTest("❌ Error al monitorizar audio")
@@ -104,15 +144,12 @@ export default function JamWebPage() {
         video: isCameraOn
       }
       
-      console.log('🎤 Solicitando micrófono...')
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
       localStreamRef.current = stream
-      console.log('✅ Micrófono obtenido:', stream.getAudioTracks().length)
       
       const localVideo = document.getElementById('localVideo') as HTMLVideoElement
       if (localVideo) {
         localVideo.srcObject = stream
-        console.log('📹 Video local conectado')
       }
       
       setIsConnected(true)
@@ -128,34 +165,52 @@ export default function JamWebPage() {
       
     } catch (error) {
       console.error('Error al acceder al micrófono:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido'
-      setAudioTest("❌ Error: " + errorMessage)
+      setAudioTest("❌ Error: No se pudo acceder al micrófono")
       addMessage("Sistema", "❌ No se pudo acceder al micrófono. Permite el acceso en tu navegador.")
     }
   }
 
-  // ✅ Crear sala como dueño
-  const createRoom = async () => {
+  const createRoom = async (category: CategoryKey) => {
+    if (!selectedInstrument) {
+      addMessage("Sistema", "⚠️ Selecciona un instrumento primero")
+      return
+    }
+
     const newRoomId = generateRoomId()
     setRoomId(newRoomId)
-    setIsOwner(true) // ✅ Soy el dueño
+    setIsOwner(true)
+    setSelectedCategory(category)
+    setRoomCategory(category)
     await startLocalStream()
     setIsInRoom(true)
+    
+    const categoryName = CATEGORIES[category].name
     setParticipants([{ 
       id: user?.id || 'local', 
       name: myName || user?.email || 'Anónimo',
       isMuted: false,
       isVideoEnabled: isCameraOn,
-      isOwner: true, // ✅ El creador es dueño
-      volume: 0.8
+      isOwner: true,
+      volume: 0.8,
+      instrument: selectedInstrument,
+      category: category
     }])
-    addMessage("Sistema", `👑 ${myName} ha creado la sala ${newRoomId}`)
-    subscribeToRoom(newRoomId)
+    
+    addMessage("Sistema", `👑 ${myName} ha creado una sala de ${categoryName} con ${selectedInstrument}`)
+    subscribeToRoom(newRoomId, category)
   }
 
   const joinRoom = async () => {
-    if (!roomId.trim()) return
-    setIsOwner(false) // ✅ No soy dueño
+    if (!roomId.trim()) {
+      addMessage("Sistema", "⚠️ Introduce un código de sala")
+      return
+    }
+    if (!selectedInstrument) {
+      addMessage("Sistema", "⚠️ Selecciona un instrumento primero")
+      return
+    }
+
+    setIsOwner(false)
     await startLocalStream()
     setIsInRoom(true)
     setParticipants([{ 
@@ -164,13 +219,15 @@ export default function JamWebPage() {
       isMuted: false,
       isVideoEnabled: isCameraOn,
       isOwner: false,
-      volume: 0.8
+      volume: 0.8,
+      instrument: selectedInstrument,
+      category: selectedCategory || ''
     }])
-    addMessage("Sistema", `🎵 ${myName} se ha unido a la sala ${roomId}`)
-    subscribeToRoom(roomId)
+    addMessage("Sistema", `🎵 ${myName} se ha unido a la sala ${roomId} con ${selectedInstrument}`)
+    subscribeToRoom(roomId, selectedCategory || 'moderna')
   }
 
-  const subscribeToRoom = (roomId: string) => {
+  const subscribeToRoom = (roomId: string, category: string) => {
     if (channelRef.current) {
       channelRef.current.unsubscribe()
     }
@@ -189,7 +246,15 @@ export default function JamWebPage() {
         console.log('📥 ICE candidate recibido:', payload)
       })
       .on('broadcast', { event: 'user-joined' }, ({ payload }) => {
-        addMessage("Sistema", `👤 ${payload.name} se ha unido`)
+        const instrumentEmoji = getInstrumentEmoji(payload.instrument)
+        const categoryName = payload.category ? CATEGORIES[payload.category as CategoryKey]?.name || payload.category : 'Sin categoría'
+        
+        if (payload.isOwner && payload.category) {
+          setRoomCategory(payload.category)
+          setSelectedCategory(payload.category as CategoryKey)
+        }
+        
+        addMessage("Sistema", `👤 ${payload.name} (${instrumentEmoji} ${payload.instrument}) se ha unido a ${categoryName}`)
         setParticipants(prev => {
           if (!prev.find(p => p.id === payload.id)) {
             return [...prev, { 
@@ -197,8 +262,10 @@ export default function JamWebPage() {
               name: payload.name, 
               isMuted: false, 
               isVideoEnabled: false,
-              isOwner: false,
-              volume: 0.8
+              isOwner: payload.isOwner || false,
+              volume: 0.8,
+              instrument: payload.instrument || 'Sin instrumento',
+              category: payload.category || category
             }]
           }
           return prev
@@ -210,7 +277,6 @@ export default function JamWebPage() {
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
         setPeerCount(prev => Math.max(0, prev - 1))
       })
-      // ✅ Escuchar eventos de mute del dueño
       .on('broadcast', { event: 'mute-user' }, ({ payload }) => {
         if (payload.targetId === user?.id) {
           const isMuted = payload.muted
@@ -224,14 +290,18 @@ export default function JamWebPage() {
           addMessage("Sistema", isMuted ? "🔇 El dueño te ha silenciado" : "🎤 El dueño te ha activado el micrófono")
         }
       })
-      // ✅ Escuchar cambios de volumen master
       .on('broadcast', { event: 'master-volume' }, ({ payload }) => {
         setMasterVolume(payload.volume)
-        // Aplicar a todos los nodos de ganancia
         gainNodesRef.current.forEach((gainNode) => {
           gainNode.gain.value = payload.volume
         })
         addMessage("Sistema", `🎚️ El dueño ha cambiado el volumen master a ${Math.round(payload.volume * 100)}%`)
+      })
+      .on('broadcast', { event: 'room-category' }, ({ payload }) => {
+        setRoomCategory(payload.category)
+        setSelectedCategory(payload.category as CategoryKey)
+        const categoryName = CATEGORIES[payload.category as CategoryKey]?.name || payload.category
+        addMessage("Sistema", `🏷️ La sala ahora es de ${categoryName}`)
       })
       .subscribe((status) => {
         console.log('🔊 Canal de señalización:', status)
@@ -242,14 +312,25 @@ export default function JamWebPage() {
             payload: { 
               id: user?.id || 'local', 
               name: myName || 'Anónimo',
-              isOwner: isOwner
+              isOwner: isOwner,
+              instrument: selectedInstrument,
+              category: category
             }
           })
+          
+          if (isOwner) {
+            setTimeout(() => {
+              channel.send({
+                type: 'broadcast',
+                event: 'room-category',
+                payload: { category: category }
+              })
+            }, 500)
+          }
         }
       })
   }
 
-  // ✅ Mutear a un usuario (solo dueño)
   const muteParticipant = (participantId: string, muted: boolean) => {
     if (!isOwner) {
       addMessage("Sistema", "⚠️ Solo el dueño de la sala puede mutear usuarios")
@@ -259,12 +340,10 @@ export default function JamWebPage() {
     const participant = participants.find(p => p.id === participantId)
     if (!participant) return
 
-    // Actualizar estado local
     setParticipants(prev => prev.map(p => 
       p.id === participantId ? { ...p, isMuted: muted } : p
     ))
 
-    // Enviar evento por broadcast
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -279,43 +358,18 @@ export default function JamWebPage() {
     addMessage("Sistema", `🔇 ${participant.name} ha sido ${muted ? 'silenciado' : 'activado'}`)
   }
 
-  // ✅ Cambiar volumen de un participante (solo dueño)
   const changeParticipantVolume = (participantId: string, volume: number) => {
-    if (!isOwner) {
-      addMessage("Sistema", "⚠️ Solo el dueño de la sala puede ajustar el volumen")
-      return
-    }
-
+    if (!isOwner) return
     const newVolume = Math.max(0, Math.min(1, volume))
     setParticipants(prev => prev.map(p => 
       p.id === participantId ? { ...p, volume: newVolume } : p
     ))
-
-    // Aplicar a los nodos de ganancia
-    const gainNode = gainNodesRef.current.get(participantId)
-    if (gainNode) {
-      gainNode.gain.value = newVolume
-    }
-
-    addMessage("Sistema", `🎚️ Volumen de ${participants.find(p => p.id === participantId)?.name} ajustado a ${Math.round(newVolume * 100)}%`)
   }
 
-  // ✅ Cambiar volumen master (solo dueño)
   const changeMasterVolume = (volume: number) => {
-    if (!isOwner) {
-      addMessage("Sistema", "⚠️ Solo el dueño puede ajustar el volumen master")
-      return
-    }
-
+    if (!isOwner) return
     const newVolume = Math.max(0, Math.min(1, volume))
     setMasterVolume(newVolume)
-
-    // Aplicar a todos los nodos de ganancia
-    gainNodesRef.current.forEach((gainNode) => {
-      gainNode.gain.value = newVolume
-    })
-
-    // Enviar evento por broadcast
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -323,8 +377,6 @@ export default function JamWebPage() {
         payload: { volume: newVolume }
       })
     }
-
-    addMessage("Sistema", `🎚️ Volumen master ajustado a ${Math.round(newVolume * 100)}%`)
   }
 
   const toggleMute = () => {
@@ -487,6 +539,9 @@ export default function JamWebPage() {
     setPeerCount(0)
     setAudioTest("")
     setIsOwner(false)
+    setSelectedCategory(null)
+    setSelectedInstrument("")
+    setRoomCategory("")
   }
 
   if (!user) {
@@ -506,7 +561,8 @@ export default function JamWebPage() {
         background: "#0a0a0a",
         color: "white",
         alignItems: "center",
-        justifyContent: "center"
+        justifyContent: "center",
+        padding: "20px"
       }}>
         <div style={{
           maxWidth: 400,
@@ -569,158 +625,223 @@ export default function JamWebPage() {
         background: "#0a0a0a",
         color: "white",
         alignItems: "center",
-        justifyContent: "center"
+        justifyContent: "center",
+        padding: "20px"
       }}>
         <div style={{
-          maxWidth: 400,
+          maxWidth: 600,
           width: "100%",
           padding: 40,
           borderRadius: 16,
           background: "rgba(255,255,255,0.05)",
-          border: "1px solid rgba(255,255,255,0.1)",
-          textAlign: "center"
+          border: "1px solid rgba(255,255,255,0.1)"
         }}>
-          <h1 style={{ fontSize: 48, marginBottom: 8 }}>🎵</h1>
-          <h2 style={{ marginBottom: 8 }}>Jam Session Web</h2>
-          <p style={{ color: "#6b7280", marginBottom: 24 }}>
-            Crea una sala o únete a una existente
-          </p>
+          <h1 style={{ fontSize: 48, textAlign: "center", marginBottom: 8 }}>🎵</h1>
+          <h2 style={{ textAlign: "center", marginBottom: 24 }}>Jam Session Web</h2>
           
-          <button
-            onClick={createRoom}
-            style={{
-              width: "100%",
-              padding: "14px",
-              background: "#10b981",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: "bold",
-              cursor: "pointer",
-              marginBottom: 16
-            }}
-          >
-            🎸 Crear sala (serás el dueño 👑)
-          </button>
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>
+              🎯 Elige el tipo de Jam:
+            </p>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              {Object.entries(CATEGORIES).map(([key, cat]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setSelectedCategory(key as CategoryKey)
+                    setSelectedInstrument("")
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: "120px",
+                    padding: "12px 16px",
+                    background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
+                    color: selectedCategory === key ? "#10b981" : "#9ca3af",
+                    border: selectedCategory === key ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    fontWeight: selectedCategory === key ? "bold" : "normal",
+                    textAlign: "center"
+                  }}
+                >
+                  <div style={{ fontSize: 28 }}>{cat.emoji}</div>
+                  <div style={{ fontSize: 13 }}>{cat.name}</div>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
+                    {cat.instruments.join(', ')}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <div style={{ display: "flex", gap: "8px" }}>
-            <input
-              type="text"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-              placeholder="Código de sala"
-              style={{
-                flex: 1,
-                padding: "10px 14px",
-                borderRadius: 8,
-                border: "1px solid #333",
-                background: "rgba(255,255,255,0.05)",
-                color: "white",
-                fontSize: 16,
-                textTransform: "uppercase"
-              }}
-            />
+          {selectedCategory && (
+            <div style={{ marginBottom: 20 }}>
+              <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>
+                🎸 Elige tu instrumento:
+              </p>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                {CATEGORIES[selectedCategory].instruments.map((inst) => {
+                  const emoji = getInstrumentEmoji(inst)
+                  return (
+                    <button
+                      key={inst}
+                      onClick={() => setSelectedInstrument(inst)}
+                      style={{
+                        padding: "8px 16px",
+                        background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
+                        color: selectedInstrument === inst ? "#10b981" : "#9ca3af",
+                        border: selectedInstrument === inst ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        fontSize: 14
+                      }}
+                    >
+                      {emoji} {inst}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <button
-              onClick={joinRoom}
-              disabled={!roomId.trim()}
+              onClick={() => {
+                if (selectedCategory && selectedInstrument) {
+                  createRoom(selectedCategory)
+                } else {
+                  addMessage("Sistema", "⚠️ Selecciona categoría e instrumento")
+                }
+              }}
+              disabled={!selectedCategory || !selectedInstrument}
               style={{
-                padding: "10px 20px",
-                background: roomId.trim() ? "#10b981" : "#444",
+                width: "100%",
+                padding: "14px",
+                background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444",
                 color: "white",
                 border: "none",
                 borderRadius: 8,
-                cursor: roomId.trim() ? "pointer" : "not-allowed",
-                fontWeight: "bold"
+                fontSize: 16,
+                fontWeight: "bold",
+                cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed"
               }}
             >
-              Unirse
+              🎸 Crear sala
             </button>
-          </div>
 
-          <p style={{ color: "#6b7280", fontSize: 12, marginTop: 16 }}>
-            Máximo 5 participantes por sala
-          </p>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input
+                type="text"
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                placeholder="Código de sala"
+                style={{
+                  flex: 1,
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #333",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "white",
+                  fontSize: 16,
+                  textTransform: "uppercase"
+                }}
+              />
+              <button
+                onClick={joinRoom}
+                disabled={!roomId.trim() || !selectedCategory || !selectedInstrument}
+                style={{
+                  padding: "10px 20px",
+                  background: (roomId.trim() && selectedCategory && selectedInstrument) ? "#3b82f6" : "#444",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: (roomId.trim() && selectedCategory && selectedInstrument) ? "pointer" : "not-allowed",
+                  fontWeight: "bold"
+                }}
+              >
+                Unirse
+              </button>
+            </div>
+            <p style={{ color: "#6b7280", fontSize: 12, textAlign: "center" }}>
+              {selectedCategory && selectedInstrument 
+                ? `🎵 ${CATEGORIES[selectedCategory].name} - ${selectedInstrument}` 
+                : "Selecciona categoría e instrumento para empezar"}
+            </p>
+          </div>
         </div>
       </div>
     )
   }
 
-  // ✅ Lista de participantes con controles (solo para el dueño)
+  const getCategoryDisplay = () => {
+    if (roomCategory && CATEGORIES[roomCategory as CategoryKey]) {
+      const cat = CATEGORIES[roomCategory as CategoryKey]
+      return `${cat.emoji} ${cat.name}`
+    }
+    return '🎵 Sin categoría'
+  }
+
   const renderParticipants = () => {
     return participants.map((p) => {
       const isMe = p.id === user?.id || p.id === 'local'
+      const instrumentEmoji = getInstrumentEmoji(p.instrument)
       
       return (
         <div key={p.id} style={{
           display: "flex",
           alignItems: "center",
-          gap: "12px",
-          padding: "8px 12px",
+          gap: "8px",
+          padding: "6px 10px",
           background: isMe ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
-          borderRadius: 8,
+          borderRadius: 6,
           border: isMe ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)"
         }}>
-          <span style={{ fontSize: 18 }}>
-            {p.isOwner ? "👑" : "🎵"}
-          </span>
-          <span style={{ flex: 1, color: "white", fontWeight: isMe ? "bold" : "normal" }}>
+          <span>{instrumentEmoji}</span>
+          <span style={{ flex: 1, color: "white", fontSize: 13, fontWeight: isMe ? "bold" : "normal" }}>
             {p.name} {isMe && "(tú)"}
             {p.isMuted && " 🔇"}
           </span>
+          <span style={{ fontSize: 11, color: "#6b7280" }}>
+            {p.instrument}
+          </span>
           
-          {/* ✅ Control de volumen individual (solo dueño) */}
           {isOwner && !isMe && (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span style={{ fontSize: 11, color: "#6b7280", minWidth: "30px" }}>
-                {Math.round(p.volume * 100)}%
-              </span>
+            <>
               <input
                 type="range"
                 min="0"
                 max="1"
                 step="0.05"
                 value={p.volume}
-                onChange={(e) => {
-                  const volume = parseFloat(e.target.value)
-                  changeParticipantVolume(p.id, volume)
-                }}
-                style={{
-                  width: "80px",
-                  accentColor: "#10b981"
-                }}
+                onChange={(e) => changeParticipantVolume(p.id, parseFloat(e.target.value))}
+                style={{ width: "60px", accentColor: "#10b981" }}
               />
-            </div>
+              <button
+                onClick={() => muteParticipant(p.id, !p.isMuted)}
+                style={{
+                  padding: "2px 8px",
+                  background: p.isMuted ? "#10b981" : "#ef4444",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 11
+                }}
+              >
+                {p.isMuted ? "🔊" : "🔇"}
+              </button>
+            </>
           )}
           
-          {/* ✅ Botón de mute (solo dueño, no puede mutearse a sí mismo) */}
-          {isOwner && !isMe && (
-            <button
-              onClick={() => muteParticipant(p.id, !p.isMuted)}
-              style={{
-                padding: "4px 10px",
-                background: p.isMuted ? "#10b981" : "#ef4444",
-                color: "white",
-                border: "none",
-                borderRadius: 4,
-                cursor: "pointer",
-                fontSize: 12
-              }}
-            >
-              {p.isMuted ? "🔊 Activar" : "🔇 Silenciar"}
-            </button>
-          )}
-          
-          {/* Badge de dueño */}
           {p.isOwner && (
             <span style={{
               fontSize: 10,
               background: "rgba(251,191,36,0.2)",
               color: "#fbbf24",
-              padding: "2px 8px",
-              borderRadius: 12
+              padding: "2px 6px",
+              borderRadius: 10
             }}>
-              Dueño
+              👑
             </span>
           )}
         </div>
@@ -729,13 +850,13 @@ export default function JamWebPage() {
   }
 
   return (
-    <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
+    <div style={{ padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
       <div style={{
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: 16,
-        padding: "12px 16px",
+        marginBottom: 12,
+        padding: "10px 16px",
         background: "rgba(255,255,255,0.03)",
         borderRadius: 8,
         border: "1px solid rgba(255,255,255,0.1)",
@@ -743,124 +864,44 @@ export default function JamWebPage() {
         gap: 8
       }}>
         <div>
-          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 Sala: {roomId}</span>
-          <span style={{ color: "#6b7280", marginLeft: 12 }}>
+          <span style={{ color: "#10b981", fontWeight: "bold" }}>
+            🎵 Sala: {roomId}
+          </span>
+          <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 14, fontWeight: "bold" }}>
+            {getCategoryDisplay()}
+          </span>
+          <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>
             👥 {participants.length}/5
           </span>
           {isOwner && (
             <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>
-              👑 Eres el dueño
-            </span>
-          )}
-          {isRecording && (
-            <span style={{ color: "#ef4444", marginLeft: 12 }}>
-              🔴 {formatTime(recordingTime)}
-            </span>
-          )}
-          {hasRecording && !isRecording && (
-            <span style={{ color: "#10b981", marginLeft: 12 }}>
-              💾 Grabación disponible
-            </span>
-          )}
-          {audioTest && (
-            <span style={{ color: audioTest.includes("✅") ? "#10b981" : "#ef4444", marginLeft: 12, fontSize: 12 }}>
-              {audioTest}
+              👑 Dueño
             </span>
           )}
         </div>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <button
-            onClick={toggleMute}
-            style={{
-              padding: "6px 14px",
-              background: isMuted ? "#ef4444" : "#10b981",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 13
-            }}
-          >
-            {isMuted ? "🔇 Desmutear" : "🎤 Mutear"}
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+            {isMuted ? "🔇" : "🎤"}
           </button>
-          <button
-            onClick={toggleCamera}
-            style={{
-              padding: "6px 14px",
-              background: isCameraOn ? "#10b981" : "#6b7280",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 13
-            }}
-          >
-            {isCameraOn ? "📹 Cámara ON" : "📹 Cámara OFF"}
+          <button onClick={toggleCamera} style={{ padding: "4px 12px", background: isCameraOn ? "#10b981" : "#6b7280", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+            {isCameraOn ? "📹" : "📹 OFF"}
           </button>
-          
           {!isRecording ? (
-            <button
-              onClick={startRecording}
-              style={{
-                padding: "6px 14px",
-                background: "#ef4444",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 13
-              }}
-            >
-              🔴 Grabar
+            <button onClick={startRecording} style={{ padding: "4px 12px", background: "#ef4444", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+              🔴
             </button>
           ) : (
-            <button
-              onClick={stopRecording}
-              style={{
-                padding: "6px 14px",
-                background: "#f59e0b",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 13
-              }}
-            >
-              ⏹ Detener grabación
+            <button onClick={stopRecording} style={{ padding: "4px 12px", background: "#f59e0b", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+              ⏹
             </button>
           )}
-          
           {hasRecording && !isRecording && (
-            <button
-              onClick={downloadRecording}
-              style={{
-                padding: "6px 14px",
-                background: "#10b981",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: "bold"
-              }}
-            >
-              💾 Descargar grabación
+            <button onClick={downloadRecording} style={{ padding: "4px 12px", background: "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: "bold" }}>
+              💾
             </button>
           )}
-          
-          <button
-            onClick={leaveRoom}
-            style={{
-              padding: "6px 14px",
-              background: "rgba(239,68,68,0.15)",
-              color: "#ef4444",
-              border: "1px solid rgba(239,68,68,0.3)",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 13
-            }}
-          >
-            Salir
+          <button onClick={leaveRoom} style={{ padding: "4px 12px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+            ✕
           </button>
         </div>
       </div>
@@ -868,12 +909,11 @@ export default function JamWebPage() {
       <div style={{
         display: "grid",
         gridTemplateColumns: "2fr 1fr",
-        gap: "16px"
+        gap: "12px"
       }}>
-        {/* Video principal */}
         <div>
           <div style={{
-            marginBottom: 16,
+            marginBottom: 12,
             background: "rgba(255,255,255,0.03)",
             borderRadius: 8,
             overflow: "hidden",
@@ -921,7 +961,6 @@ export default function JamWebPage() {
             </div>
           </div>
 
-          {/* Lista de participantes con controles */}
           <div style={{
             background: "rgba(255,255,255,0.03)",
             borderRadius: 8,
@@ -938,7 +977,6 @@ export default function JamWebPage() {
           </div>
         </div>
 
-        {/* Chat */}
         <div style={{
           display: "flex",
           flexDirection: "column",
@@ -1020,7 +1058,6 @@ export default function JamWebPage() {
             </button>
           </div>
           
-          {/* Control de volumen master (solo dueño) */}
           {isOwner && (
             <div style={{
               padding: "8px 12px",
