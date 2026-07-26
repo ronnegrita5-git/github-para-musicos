@@ -19,7 +19,7 @@ interface Track {
   mime_type?: string
   is_loop?: boolean
   loop_repeat?: number
-  instrument?: string // ✅ NUEVO
+  instrument?: string
 }
 
 interface Project {
@@ -39,14 +39,12 @@ interface Project {
   created_at: string
 }
 
-// ✅ Emojis por categoría
 const CATEGORY_EMOJIS: Record<string, string> = {
   'viento': '🎷',
   'cuerda': '🎻',
   'moderna': '🎸'
 }
 
-// ✅ Emojis por instrumento
 const INSTRUMENT_EMOJIS: Record<string, string> = {
   'Trompeta': '🎺',
   'Saxofón': '🎷',
@@ -77,7 +75,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [loadingTracks, setLoadingTracks] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedTracks, setSelectedTracks] = useState<Set<string>>(new Set())
-  const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(-1)
   const [audioUrl, setAudioUrl] = useState<string>("")
   const [isPlaying, setIsPlaying] = useState(false)
   const [forkModalOpen, setForkModalOpen] = useState(false)
@@ -89,11 +86,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [masterVolume, setMasterVolume] = useState(0.8)
   const [trackVolumes, setTrackVolumes] = useState<Record<string, number>>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
-  
+  const [loopEnabled, setLoopEnabled] = useState(false) // ✅ NUEVO: loop
+
   // Referencias del mezclador
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
+  const scheduledStopRef = useRef<NodeJS.Timeout | null>(null) // ✅ NUEVO: para loop
 
   const loadTracks = async () => {
     try {
@@ -162,6 +161,9 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
+      if (scheduledStopRef.current) {
+        clearTimeout(scheduledStopRef.current)
+      }
     }
   }, [id])
 
@@ -176,7 +178,23 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
+  // ✅ Calcular duración total de las pistas seleccionadas
+  const getTotalDuration = (selectedTracksList: Track[]) => {
+    let maxDuration = 0
+    for (const track of selectedTracksList) {
+      const node = audioNodesRef.current.find(n => n.trackId === track.id)
+      if (node && node.buffer) {
+        const duration = node.buffer.duration
+        if (duration > maxDuration) {
+          maxDuration = duration
+        }
+      }
+    }
+    return maxDuration
+  }
+
   const playSelectedTracks = async () => {
+    // ✅ Detener todo antes de reproducir
     stopAllAudio()
     
     if (selectedTracks.size === 0) {
@@ -212,7 +230,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           
           const source = ctx.createBufferSource()
           source.buffer = audioBuffer
-          source.loop = false
+          source.loop = loopEnabled // ✅ Aplicar loop si está activado
           
           const gainNode = ctx.createGain()
           const volume = trackVolumes[track.id] || 0.8
@@ -236,6 +254,19 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       }
       
       setIsPlaying(true)
+      setAudioUrl(selected[0]?.audio_url || "")
+      
+      // ✅ Si loop está desactivado, programar el stop automático
+      if (!loopEnabled) {
+        const maxDuration = getTotalDuration(selected)
+        if (scheduledStopRef.current) {
+          clearTimeout(scheduledStopRef.current)
+        }
+        scheduledStopRef.current = setTimeout(() => {
+          stopAllAudio()
+        }, (maxDuration + 0.5) * 1000) // Margen de 0.5 segundos
+      }
+      
     } catch (error) {
       console.error('Error al reproducir:', error)
       alert('Error al reproducir las pistas')
@@ -244,6 +275,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
+  // ✅ Detener toda reproducción
   const stopAllAudio = () => {
     audioNodesRef.current.forEach(({ source }) => {
       try {
@@ -252,6 +284,11 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     })
     audioNodesRef.current = []
     setIsPlaying(false)
+    setAudioUrl("")
+    if (scheduledStopRef.current) {
+      clearTimeout(scheduledStopRef.current)
+      scheduledStopRef.current = null
+    }
   }
 
   const updateMasterVolume = (value: number) => {
@@ -280,6 +317,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     const newSelected = new Set(selectedTracks)
     if (newSelected.has(trackId)) {
       newSelected.delete(trackId)
+      // ✅ Si no hay pistas seleccionadas, detener reproducción
+      if (newSelected.size === 0) {
+        stopAllAudio()
+      }
     } else {
       newSelected.add(trackId)
     }
@@ -287,13 +328,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   }
 
   const selectAllTracks = () => {
+    // ✅ Detener reproducción actual antes de seleccionar todas
+    stopAllAudio()
     const allIds = new Set(tracks.map(t => t.id))
     setSelectedTracks(allIds)
   }
 
   const deselectAllTracks = () => {
-    setSelectedTracks(new Set())
+    // ✅ Detener reproducción al deseleccionar todas
     stopAllAudio()
+    setSelectedTracks(new Set())
   }
 
   const deleteTrack = async (trackId: string) => {
@@ -811,6 +855,23 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                         ⏹ Detener
                       </button>
                     )}
+                    
+                    {/* ✅ BOTÓN DE LOOP */}
+                    <button
+                      onClick={() => setLoopEnabled(!loopEnabled)}
+                      style={{
+                        padding: "8px 16px",
+                        background: loopEnabled ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
+                        color: loopEnabled ? "#10b981" : "#6b7280",
+                        border: loopEnabled ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        fontSize: 13,
+                        fontWeight: loopEnabled ? "bold" : "normal"
+                      }}
+                    >
+                      {loopEnabled ? "🔁 Loop ON" : "➡️ Loop OFF"}
+                    </button>
                     
                     <span style={{ color: "#6b7280", fontSize: 13 }}>
                       {selectedCount} pistas seleccionadas
