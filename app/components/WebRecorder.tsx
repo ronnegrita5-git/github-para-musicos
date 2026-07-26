@@ -22,7 +22,7 @@ const CATEGORIES = {
 interface WebRecorderProps {
   projectId: string;
   onRecordingComplete: () => void;
-  projectCategory?: string; // ✅ NUEVO
+  projectCategory?: string;
 }
 
 export default function WebRecorder({ projectId, onRecordingComplete, projectCategory }: WebRecorderProps) {
@@ -114,6 +114,7 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
         .from('audio')
         .getPublicUrl(filePath);
 
+      // ✅ Guardar en tracks SIN mime_type
       const { error: insertError } = await supabase
         .from('tracks')
         .insert({
@@ -122,8 +123,7 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
           project_id: projectId,
           user_id: user.id,
           size: blob.size,
-          mime_type: 'audio/wav',
-          instrument: selectedInstrument // ✅ NUEVO
+          instrument: selectedInstrument
         });
 
       if (insertError) throw insertError;

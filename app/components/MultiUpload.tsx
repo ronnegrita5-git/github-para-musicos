@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/app/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 
-// ✅ Definición de categorías e instrumentos (misma que en Jam)
+// ✅ Definición de categorías e instrumentos
 const CATEGORIES = {
   'viento': {
     name: '🎷 Banda de Viento',
@@ -23,7 +23,7 @@ const CATEGORIES = {
 interface MultiUploadProps {
   projectId: string;
   onUploadComplete: () => void;
-  projectCategory?: string; // ✅ Nueva prop: categoría del proyecto
+  projectCategory?: string;
 }
 
 export default function MultiUpload({ projectId, onUploadComplete, projectCategory }: MultiUploadProps) {
@@ -33,13 +33,11 @@ export default function MultiUpload({ projectId, onUploadComplete, projectCatego
   const [selectedInstrument, setSelectedInstrument] = useState<string>('');
   const [instruments, setInstruments] = useState<string[]>([]);
 
-  // ✅ Cargar instrumentos según la categoría del proyecto
   useEffect(() => {
     if (projectCategory && CATEGORIES[projectCategory as keyof typeof CATEGORIES]) {
       setInstruments(CATEGORIES[projectCategory as keyof typeof CATEGORIES].instruments);
       setSelectedInstrument(CATEGORIES[projectCategory as keyof typeof CATEGORIES].instruments[0] || '');
     } else {
-      // Si no hay categoría, mostrar todos los instrumentos
       const allInstruments = Object.values(CATEGORIES).flatMap(cat => cat.instruments);
       setInstruments(allInstruments);
       setSelectedInstrument(allInstruments[0] || '');
@@ -67,17 +65,20 @@ export default function MultiUpload({ projectId, onUploadComplete, projectCatego
     try {
       for (const file of files) {
         const filePath = `projects/${projectId}/${Date.now()}_${file.name}`;
+        
+        // Subir a Supabase Storage
         const { error: uploadError } = await supabase.storage
           .from('audio')
           .upload(filePath, file);
 
         if (uploadError) throw uploadError;
 
+        // Obtener URL pública
         const { data: urlData } = supabase.storage
           .from('audio')
           .getPublicUrl(filePath);
 
-        // ✅ Guardar el instrumento en la pista
+        // ✅ Guardar en tracks SIN mime_type
         const { error: insertError } = await supabase
           .from('tracks')
           .insert({
@@ -86,11 +87,13 @@ export default function MultiUpload({ projectId, onUploadComplete, projectCatego
             project_id: projectId,
             user_id: user.id,
             size: file.size,
-            mime_type: file.type,
-            instrument: selectedInstrument // ✅ NUEVO
+            instrument: selectedInstrument
           });
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('Error insertando:', insertError);
+          throw insertError;
+        }
       }
 
       alert(`✅ ${files.length} archivo(s) subido(s) como "${selectedInstrument}"`);
@@ -98,7 +101,7 @@ export default function MultiUpload({ projectId, onUploadComplete, projectCatego
       onUploadComplete();
     } catch (error) {
       console.error('Error subiendo archivos:', error);
-      alert('Error al subir archivos');
+      alert(`Error al subir archivos: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     } finally {
       setUploading(false);
     }
@@ -106,7 +109,6 @@ export default function MultiUpload({ projectId, onUploadComplete, projectCatego
 
   return (
     <div style={{ padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
-      {/* ✅ Selector de instrumento */}
       <div style={{ marginBottom: 8 }}>
         <label style={{ color: '#9ca3af', fontSize: 13, display: 'block', marginBottom: 4 }}>
           🎸 Instrumento:
