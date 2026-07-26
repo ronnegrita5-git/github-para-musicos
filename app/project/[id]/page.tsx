@@ -49,7 +49,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [audioUrl, setAudioUrl] = useState<string>("")
   const [isPlaying, setIsPlaying] = useState(false)
   const [forkModalOpen, setForkModalOpen] = useState(false)
-  const [isOwner, setIsOwner] = useState(false)
+  const [isOwner, setIsOwner] = useState<boolean>(false)
   const [parentProject, setParentProject] = useState<any>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -80,7 +80,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
       if (error) throw error
       setProject(data)
-      setIsOwner(user && user.id === data.user_id)
+      
+      // 🔧 FIX: Verificar que user existe antes de comparar
+      if (user && user.id === data.user_id) {
+        setIsOwner(true)
+      } else {
+        setIsOwner(false)
+      }
 
       if (data.parent_project_id) {
         const { data: parentData } = await supabase
@@ -359,7 +365,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                       .from("projects")
                       .update({ is_public: !project.is_public })
                       .eq("id", id)
-                      .eq("user_id", user.id)
+                      .eq("user_id", user?.id || '')
                     if (error) throw error
                     setProject({ ...project, is_public: !project.is_public })
                   } catch (error) {
