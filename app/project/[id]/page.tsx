@@ -81,18 +81,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [isOwner, setIsOwner] = useState<boolean>(false)
   const [parentProject, setParentProject] = useState<any>(null)
 
-  // Estados del mezclador
   const [masterVolume, setMasterVolume] = useState(0.8)
   const [trackVolumes, setTrackVolumes] = useState<Record<string, number>>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [loopEnabled, setLoopEnabled] = useState(false)
 
-  // Referencias del mezclador
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
-  const scheduledStopRef = useRef<NodeJS.Timeout | null>(null)
-  const isPlayingRef = useRef(false)
 
   const loadTracks = async () => {
     try {
@@ -161,9 +157,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
-      if (scheduledStopRef.current) {
-        clearTimeout(scheduledStopRef.current)
-      }
     }
   }, [id])
 
@@ -206,6 +199,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       source.connect(gainNode)
       gainNode.connect(masterGainRef.current)
       
+      // ✅ Guardar referencia
       audioNodesRef.current.push({
         node: gainNode,
         source: source,
@@ -213,20 +207,30 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         buffer: audioBuffer
       })
       
-      source.start(0)
-      isPlayingRef.current = true
-      setIsPlaying(true)
-      
-      if (audioNodesRef.current.length === 1) {
-        setAudioUrl(track.audio_url)
+      // ✅ Cuando termine esta pista, eliminarla de la lista (sin afectar a las demás)
+      source.onended = () => {
+        // Solo eliminar si sigue en la lista (no fue eliminada manualmente)
+        const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
+        if (index !== -1) {
+          audioNodesRef.current.splice(index, 1)
+          // Si no quedan pistas, actualizar estado
+          if (audioNodesRef.current.length === 0) {
+            setIsPlaying(false)
+            setAudioUrl("")
+          }
+        }
       }
+      
+      source.start(0)
+      setIsPlaying(true)
+      setAudioUrl(track.audio_url)
       
     } catch (err) {
       console.error(`Error al reproducir ${track.name}:`, err)
     }
   }
 
-  // ✅ Quitar una pista de la reproducción
+  // ✅ Quitar una pista manualmente (por deselección)
   const removeTrackFromPlayback = (trackId: string) => {
     const index = audioNodesRef.current.findIndex(n => n.trackId === trackId)
     if (index !== -1) {
@@ -237,12 +241,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       
       if (audioNodesRef.current.length === 0) {
         setIsPlaying(false)
-        isPlayingRef.current = false
         setAudioUrl("")
-        if (scheduledStopRef.current) {
-          clearTimeout(scheduledStopRef.current)
-          scheduledStopRef.current = null
-        }
       }
     }
   }
@@ -267,14 +266,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       }
     }
     
-    // Si no hay pistas sonando, actualizar estado
-    if (audioNodesRef.current.length === 0) {
-      setIsPlaying(false)
-      isPlayingRef.current = false
-      setAudioUrl("")
-    } else {
+    // Actualizar estado de reproducción
+    if (audioNodesRef.current.length > 0) {
       setIsPlaying(true)
-      isPlayingRef.current = true
+    } else {
+      setIsPlaying(false)
+      setAudioUrl("")
     }
   }
 
@@ -287,15 +284,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       newSelected.add(trackId)
     }
     setSelectedTracks(newSelected)
-    
-    // ✅ Sincronizar reproducción sin interrumpir
     await syncPlaybackWithSelection()
   }
 
   const selectAllTracks = async () => {
     const allIds = new Set(tracks.map(t => t.id))
     setSelectedTracks(allIds)
-    // ✅ Detener todo y reproducir todas
     stopAllAudio()
     await syncPlaybackWithSelection()
   }
@@ -313,16 +307,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     })
     audioNodesRef.current = []
     setIsPlaying(false)
-    isPlayingRef.current = false
     setAudioUrl("")
-    if (scheduledStopRef.current) {
-      clearTimeout(scheduledStopRef.current)
-      scheduledStopRef.current = null
-    }
   }
 
   const playSelectedTracks = async () => {
-    // Detener todo y comenzar de nuevo
     stopAllAudio()
     
     if (selectedTracks.size === 0) {
@@ -350,8 +338,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       setIsLoadingAudio(false)
     }
   }
-
-  // ... (resto de funciones igual: deleteTrack, deleteProject, downloadProject, downloadSingleTrack)
 
   const deleteTrack = async (trackId: string) => {
     if (!user) {
