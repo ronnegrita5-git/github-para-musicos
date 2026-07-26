@@ -2,20 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { supabase } from '@/lib/supabase'
-
-interface User {
-  id: string
-  email: string
-  first_name?: string
-  last_name?: string
-  city?: string
-  country?: string
-  instrument_id?: string
-  music_genre?: string
-  bio?: string
-  avatar_url?: string
-  created_at?: string
-}
+import { User } from '@supabase/supabase-js'
 
 interface AuthContextType {
   user: User | null
@@ -46,131 +33,56 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('user')
-    if (savedUser) {
-      setUser(JSON.parse(savedUser))
-    }
-    setLoading(false)
-
-    const { data: { subscription } } = supabase!.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setUser(null)
-        localStorage.removeItem('user')
+    // Obtener sesión actual
+    const getSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        setUser(session?.user ?? null)
+      } catch (error) {
+        console.error('Error getting session:', error)
+      } finally {
+        setLoading(false)
       }
-    })
+    }
+
+    getSession()
+
+    // Escuchar cambios en autenticación
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        setUser(session?.user ?? null)
+        setLoading(false)
+      }
+    )
 
     return () => subscription.unsubscribe()
   }, [])
 
-  const signUp = async (email: string, password: string, userData?: Partial<User>) => {
-    try {
-      console.log("📝 Registrando usuario:", email)
-      
-      const { data, error } = await supabase!.auth.signUp({
-        email,
-        password,
-      })
-
-      if (error) {
-        console.error("❌ Error en signUp:", error)
-        throw error
-      }
-
-      console.log("✅ Usuario creado en auth:", data.user)
-
-      if (data.user) {
-        // Insertar en la tabla users
-        const { error: dbError } = await supabase!
-          .from('users')
-          .insert({
-            id: data.user.id,
-            email,
-            first_name: userData?.first_name || null,
-            last_name: userData?.last_name || null,
-            city: userData?.city || null,
-            country: userData?.country || null,
-            instrument_id: userData?.instrument_id || null,
-            music_genre: userData?.music_genre || null,
-            bio: userData?.bio || null,
-          })
-
-        if (dbError) {
-          console.error("❌ Error insertando en users:", dbError)
-          throw dbError
-        }
-
-        console.log("✅ Usuario insertado en users")
-
-        const newUser = {
-          id: data.user.id,
-          email,
-          first_name: userData?.first_name || '',
-          last_name: userData?.last_name || '',
-          city: userData?.city || '',
-          country: userData?.country || '',
-          instrument_id: userData?.instrument_id || '',
-          music_genre: userData?.music_genre || '',
-          bio: userData?.bio || '',
-        }
-
-        setUser(newUser)
-        localStorage.setItem('user', JSON.stringify(newUser))
-      }
-    } catch (error) {
-      console.error('❌ Error en registro:', error)
-      throw error
-    }
+  const signUp = async (email: string, password: string, userData?: any) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: userData,
+      },
+    })
+    if (error) throw error
+    setUser(data.user)
   }
 
   const signIn = async (email: string, password: string) => {
-    try {
-      const { data, error } = await supabase!.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (error) throw error
-
-      if (data.user) {
-        const { data: userData, error: dbError } = await supabase!
-          .from('users')
-          .select('*')
-          .eq('id', data.user.id)
-          .single()
-
-        if (dbError) throw dbError
-
-        const loggedUser = {
-          id: userData.id,
-          email: userData.email,
-          first_name: userData.first_name || '',
-          last_name: userData.last_name || '',
-          city: userData.city || '',
-          country: userData.country || '',
-          instrument_id: userData.instrument_id || '',
-          music_genre: userData.music_genre || '',
-          bio: userData.bio || '',
-          avatar_url: userData.avatar_url || '',
-          created_at: userData.created_at,
-        }
-
-        setUser(loggedUser)
-        localStorage.setItem('user', JSON.stringify(loggedUser))
-      }
-    } catch (error) {
-      console.error('Error en login:', error)
-      throw error
-    }
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+    if (error) throw error
+    setUser(data.user)
   }
 
   const signOut = async () => {
-    try {
-      await supabase!.auth.signOut()
-      setUser(null)
-      localStorage.removeItem('user')
-    } catch (error) {
-      console.error('Error al cerrar sesión:', error)
-    }
+    const { error } = await supabase.auth.signOut()
+    if (error) throw error
+    setUser(null)
   }
 
   return (

@@ -4,7 +4,12 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 // Cliente normal (para operaciones autenticadas)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+})
 
 // Cliente anónimo (para consultas públicas, sin autenticación)
 export const supabasePublic = createClient(supabaseUrl, supabaseAnonKey, {
