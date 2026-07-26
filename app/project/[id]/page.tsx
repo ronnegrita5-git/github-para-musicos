@@ -17,6 +17,8 @@ interface Track {
   size?: number
   duration?: number
   mime_type?: string
+  is_loop?: boolean
+  loop_repeat?: number
 }
 
 interface Project {
@@ -30,16 +32,17 @@ interface Project {
   fork_depth: number
   fork_count: number
   bpm: number
-  stats: { views: number; stars: number }
+  category?: string
+  tags?: string[]
+  stats: { views: number; stars: number; instruments?: string[] }
   created_at: string
 }
 
-// Nodo de audio con su contexto y fuente
-interface AudioNodeWithSource {
-  node: GainNode
-  source: AudioBufferSourceNode
-  trackId: string
-  buffer: AudioBuffer
+// ✅ Definición de categorías para mostrar emojis
+const CATEGORY_EMOJIS: Record<string, string> = {
+  'viento': '🎷',
+  'cuerda': '🎻',
+  'moderna': '🎸'
 }
 
 export default function ProjectPage({ params }: { params: { id: string } }) {
@@ -51,19 +54,22 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [loadingTracks, setLoadingTracks] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedTracks, setSelectedTracks] = useState<Set<string>>(new Set())
+  const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(-1)
+  const [audioUrl, setAudioUrl] = useState<string>("")
   const [isPlaying, setIsPlaying] = useState(false)
   const [forkModalOpen, setForkModalOpen] = useState(false)
   const [isOwner, setIsOwner] = useState<boolean>(false)
   const [parentProject, setParentProject] = useState<any>(null)
-  
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
   // Estados del mezclador
   const [masterVolume, setMasterVolume] = useState(0.8)
   const [trackVolumes, setTrackVolumes] = useState<Record<string, number>>({})
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   
-  // Referencias
+  // Referencias del mezclador
   const audioContextRef = useRef<AudioContext | null>(null)
-  const audioNodesRef = useRef<AudioNodeWithSource[]>([])
+  const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
 
   const loadTracks = async () => {
@@ -77,7 +83,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       if (error) throw error
       setTracks(data || [])
       
-      // Inicializar volúmenes por pista
       const volumes: Record<string, number> = {}
       data?.forEach(track => {
         volumes[track.id] = 0.8
@@ -129,7 +134,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       loadTracks()
     }
     
-    // Limpiar al desmontar
     return () => {
       stopAllAudio()
       if (audioContextRef.current) {
@@ -138,7 +142,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }, [id])
 
-  // Inicializar contexto de audio
+  // ============ MEZCLADOR DE AUDIO ============
   const initAudioContext = () => {
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -149,9 +153,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
-  // Cargar y reproducir pistas seleccionadas
   const playSelectedTracks = async () => {
-    // Detener reproducción actual
     stopAllAudio()
     
     if (selectedTracks.size === 0) {
@@ -161,7 +163,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
     const ctx = initAudioContext()
     
-    // Crear nodo master si no existe
     if (!masterGainRef.current) {
       masterGainRef.current = ctx.createGain()
       masterGainRef.current.gain.value = masterVolume
@@ -178,7 +179,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     audioNodesRef.current = []
 
     try {
-      // Cargar y reproducir cada pista seleccionada
       for (const track of selected) {
         try {
           const response = await fetch(track.audio_url)
@@ -187,21 +187,17 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           const arrayBuffer = await response.arrayBuffer()
           const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
           
-          // Crear fuente
           const source = ctx.createBufferSource()
           source.buffer = audioBuffer
           source.loop = false
           
-          // Crear nodo de ganancia individual
           const gainNode = ctx.createGain()
           const volume = trackVolumes[track.id] || 0.8
           gainNode.gain.value = volume
           
-          // Conectar: source → gainNode → masterGain → destination
           source.connect(gainNode)
           gainNode.connect(masterGainRef.current)
           
-          // Guardar referencia para control
           audioNodesRef.current.push({
             node: gainNode,
             source: source,
@@ -209,7 +205,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             buffer: audioBuffer
           })
           
-          // Iniciar reproducción
           source.start(0)
           
         } catch (err) {
@@ -226,20 +221,16 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // Detener toda reproducción
   const stopAllAudio = () => {
     audioNodesRef.current.forEach(({ source }) => {
       try {
         source.stop()
-      } catch (e) {
-        // Ignorar errores si ya está detenido
-      }
+      } catch (e) {}
     })
     audioNodesRef.current = []
     setIsPlaying(false)
   }
 
-  // Actualizar volumen master
   const updateMasterVolume = (value: number) => {
     const newVolume = Math.max(0, Math.min(1, value))
     setMasterVolume(newVolume)
@@ -248,7 +239,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // Actualizar volumen de una pista
   const updateTrackVolume = (trackId: string, value: number) => {
     const newVolume = Math.max(0, Math.min(1, value))
     setTrackVolumes(prev => ({
@@ -256,13 +246,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       [trackId]: newVolume
     }))
     
-    // Actualizar en tiempo real si está sonando
     const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
     if (audioNode) {
       audioNode.node.gain.value = newVolume
     }
   }
 
+  // ============ FUNCIONES DE GESTIÓN ============
   const toggleTrackSelection = (trackId: string) => {
     const newSelected = new Set(selectedTracks)
     if (newSelected.has(trackId)) {
@@ -407,6 +397,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const projectName = typeof project.name === 'string' ? project.name : 'Proyecto sin título'
   const projectDescription = typeof project.description === 'string' ? project.description : 'Sin descripción'
   const projectDate = project.created_at ? new Date(project.created_at).toLocaleDateString() : 'Fecha desconocida'
+  const categoryEmoji = project.category ? CATEGORY_EMOJIS[project.category] || '🎵' : '🎵'
 
   const selectedCount = selectedTracks.size
 
@@ -532,6 +523,20 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               🔀 Este proyecto es un fork (nivel {project.fork_depth || 1})
             </p>
           )}
+          
+          {/* ✅ MOSTRAR CATEGORÍA DEL PROYECTO */}
+          {project.category && (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+              <p style={{ color: "#10b981", fontSize: 14 }}>
+                {categoryEmoji} <strong>Categoría:</strong> {project.tags?.join(' · ') || project.category}
+              </p>
+              {project.stats?.instruments && project.stats.instruments.length > 0 && (
+                <p style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>
+                  🎸 <strong>Instrumentos:</strong> {project.stats.instruments.join(', ')}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* ============ SECCIÓN DE PISTAS ============ */}
@@ -604,7 +609,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
             </p>
           ) : (
             <>
-              {/* LISTA DE PISTAS */}
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {tracks.map((track) => {
                   const hasAudio = track.audio_url && track.audio_url.length > 0
@@ -651,7 +655,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                         </div>
                         
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          {/* 📥 Descargar pista */}
                           {user && hasAudio && (
                             <button
                               onClick={async (e) => {
@@ -671,8 +674,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                               📥
                             </button>
                           )}
-                          
-                          {/* 🗑️ Eliminar pista */}
                           {isOwner && (
                             <button
                               onClick={(e) => {
@@ -695,7 +696,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                         </div>
                       </div>
                       
-                      {/* Control de volumen individual (solo si está seleccionada) */}
                       {isSelected && hasAudio && (
                         <div style={{ 
                           display: "flex", 
@@ -732,7 +732,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                 })}
               </div>
 
-              {/* ============ CONTROLES DE REPRODUCCIÓN ============ */}
               {selectedCount > 0 && (
                 <div style={{ 
                   marginTop: 20,
@@ -782,7 +781,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                     </span>
                   </div>
                   
-                  {/* Control de volumen master */}
                   <div style={{ 
                     display: "flex", 
                     alignItems: "center", 
