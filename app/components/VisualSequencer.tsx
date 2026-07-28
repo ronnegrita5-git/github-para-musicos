@@ -76,11 +76,12 @@ export default function VisualSequencer({
     Object.keys(canvasRefs.current).forEach(trackId => {
       const canvas = canvasRefs.current[trackId];
       const waveform = waveforms[trackId];
-      if (canvas && waveform && waveform.length > 0) {
+      const track = tracks.find(t => t.id === trackId);
+      
+      if (canvas && waveform && waveform.length > 0 && track) {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         
-        const rect = canvas.parentElement?.getBoundingClientRect();
         const width = canvas.width;
         const height = canvas.height;
         
@@ -90,24 +91,28 @@ export default function VisualSequencer({
         
         const barWidth = width / waveform.length;
         const mid = height / 2;
-        const progress = totalDuration > 0 ? currentTime / totalDuration : 0;
+        
+        // ✅ Calcular progreso de esta pista específica
+        const trackDuration = track.duration || 1;
+        // ✅ El progreso de la pista es relativo a su propia duración
+        const trackProgress = Math.min(currentTime / trackDuration, 1);
         
         waveform.forEach((value, index) => {
           const x = index * barWidth;
           const barHeight = Math.max(1, value * height * 0.8);
           const y = mid - barHeight / 2;
-          const isPlayed = x / width < progress;
+          const isPlayed = x / width < trackProgress;
           
           ctx.fillStyle = isPlayed ? '#10b981' : '#4a5568';
           ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
         });
       }
     });
-  }, [waveforms, currentTime, totalDuration]);
+  }, [waveforms, currentTime, tracks]);
 
   // ✅ Formatear tiempo
   const formatTime = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return '0:00';
+    if (!seconds || isNaN(seconds) || seconds < 0) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -149,11 +154,11 @@ export default function VisualSequencer({
           🎛️ Secuenciador
         </span>
         <span style={{ fontSize: 12, color: '#6b7280' }}>
-          {visibleTracks.length} pistas · {formatTime(totalDuration)}
+          {visibleTracks.length} pistas
         </span>
       </div>
 
-      {/* Línea de tiempo */}
+      {/* Línea de tiempo principal */}
       <div style={{ marginBottom: '8px' }}>
         <div style={{
           display: 'flex',
@@ -202,7 +207,7 @@ export default function VisualSequencer({
         </div>
       </div>
 
-      {/* Lista de pistas con forma de onda */}
+      {/* Lista de pistas con forma de onda - CADA UNA CON SU PROPIA DURACIÓN */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -212,6 +217,10 @@ export default function VisualSequencer({
       }}>
         {visibleTracks.map((track) => {
           const isTrackPlaying = isPlaying && selectedTracks.has(track.id);
+          // ✅ Cada pista tiene su propia duración
+          const trackDuration = track.duration || 0;
+          // ✅ El progreso de la pista es relativo a su duración
+          const trackProgress = trackDuration > 0 ? Math.min(currentTime / trackDuration, 1) : 0;
           
           return (
             <div key={track.id} style={{
@@ -256,15 +265,34 @@ export default function VisualSequencer({
                     🔊
                   </span>
                 )}
-                {track.duration && (
+                {/* ✅ Mostrar duración de la pista y progreso */}
+                {trackDuration > 0 && (
                   <span style={{
                     fontSize: 10,
                     color: '#6b7280',
-                    minWidth: 40,
+                    minWidth: 80,
                     textAlign: 'right'
                   }}>
-                    {formatTime(track.duration)}
+                    {formatTime(trackDuration * trackProgress)} / {formatTime(trackDuration)}
                   </span>
+                )}
+                {/* ✅ Pequeña barra de progreso individual */}
+                {trackDuration > 0 && (
+                  <div style={{
+                    width: '60px',
+                    height: '4px',
+                    background: 'rgba(255,255,255,0.1)',
+                    borderRadius: 2,
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      width: `${trackProgress * 100}%`,
+                      height: '100%',
+                      background: isTrackPlaying ? '#10b981' : '#4a5568',
+                      borderRadius: 2,
+                      transition: 'width 0.1s linear'
+                    }} />
+                  </div>
                 )}
               </div>
               <canvas
