@@ -66,7 +66,6 @@ const INSTRUMENT_EMOJIS: Record<string, string> = {
   'Sintetizador': '🎹'
 }
 
-// ✅ Formatear tiempo
 const formatTime = (seconds: number) => {
   if (!seconds || isNaN(seconds)) return '0:00';
   const mins = Math.floor(seconds / 60);
@@ -93,7 +92,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const [loopEnabled, setLoopEnabled] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [totalDuration, setTotalDuration] = useState(0)
-  const [isDragging, setIsDragging] = useState(false)
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioNodesRef = useRef<any[]>([])
@@ -115,18 +113,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       setTracks(data || [])
       
       const volumes: Record<string, number> = {}
-      data?.forEach(track => {
-        volumes[track.id] = 0.8
-      })
-      setTrackVolumes(volumes)
-      
-      // ✅ Calcular duración total
       let maxDuration = 0
       data?.forEach(track => {
+        volumes[track.id] = 0.8
         if (track.duration && track.duration > maxDuration) {
           maxDuration = track.duration
         }
       })
+      setTrackVolumes(volumes)
       setTotalDuration(maxDuration || 1)
       
     } catch (error) {
@@ -226,7 +220,8 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  const playTrack = async (track: Track, startTime: number = 0) => {
+  // ✅ FUNCIÓN CORREGIDA: Reproduce la pista COMPLETA desde la posición indicada
+  const playTrack = async (track: Track, startPosition: number = 0) => {
     const ctx = initAudioContext()
     
     if (!masterGainRef.current) {
@@ -236,7 +231,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
 
     const audioBuffer = await loadAudioBuffer(track)
-    if (!audioBuffer) return
+    if (!audioBuffer) return 0
 
     const source = ctx.createBufferSource()
     source.buffer = audioBuffer
@@ -269,8 +264,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       }
     }
     
-    const offset = Math.min(startTime, audioBuffer.duration)
+    // ✅ CORREGIDO: start(0, offset) reproduce desde offset hasta el final
+    // Si offset es 0, reproduce todo el audio
+    // Si offset > 0, reproduce desde esa posición
+    const offset = Math.min(startPosition, audioBuffer.duration - 0.1)
     source.start(0, offset)
+    
     return audioBuffer.duration
   }
 
@@ -291,6 +290,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
     let maxDuration = 0
     for (const track of selected) {
+      // ✅ Reproducir desde el inicio (offset = 0)
       const duration = await playTrack(track, 0)
       if (duration && duration > maxDuration) {
         maxDuration = duration
@@ -302,7 +302,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     setIsPlaying(true)
     startTimeRef.current = Date.now()
     
-    // ✅ Iniciar actualización de progreso
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current)
     }
@@ -318,7 +317,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       if (newTime < totalDuration) {
         animationRef.current = requestAnimationFrame(updateProgress)
       } else if (loopEnabled) {
-        // Reiniciar
         startTimeRef.current = Date.now()
         animationRef.current = requestAnimationFrame(updateProgress)
       } else {
@@ -347,21 +345,26 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     setCurrentTime(newTime)
     
     if (isPlayingRef.current) {
-      // Reiniciar desde la nueva posición
       const wasPlaying = isPlayingRef.current
+      // Detener todo
       stopAllAudio()
-      setTimeout(() => {
+      
+      setTimeout(async () => {
         if (wasPlaying) {
-          // Reproducir desde la nueva posición
+          // ✅ Reproducir desde la nueva posición
           const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
-          selected.forEach(async (track) => {
-            await playTrack(track, newTime)
-          })
+          let maxDuration = 0
+          for (const track of selected) {
+            const duration = await playTrack(track, newTime)
+            if (duration && duration > maxDuration) {
+              maxDuration = duration
+            }
+          }
+          setTotalDuration(maxDuration || 1)
           isPlayingRef.current = true
           setIsPlaying(true)
           startTimeRef.current = Date.now() - newTime * 1000
           
-          // Reanudar actualización de progreso
           if (animationRef.current) {
             cancelAnimationFrame(animationRef.current)
           }
