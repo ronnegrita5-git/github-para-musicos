@@ -91,6 +91,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
   const audioCacheRef = useRef<Record<string, AudioBuffer>>({})
+  const isStoppedRef = useRef<boolean>(false) // ✅ Para saber si fue detenido manualmente
 
   const loadTracks = async () => {
     try {
@@ -177,7 +178,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
-  // ✅ CORREGIDO: loadAudioBuffer ahora recibe el objeto track completo
   const loadAudioBuffer = async (track: Track): Promise<AudioBuffer | null> => {
     if (audioCacheRef.current[track.id]) {
       return audioCacheRef.current[track.id]
@@ -193,7 +193,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       
       audioCacheRef.current[track.id] = audioBuffer
       
-      // Actualizar duración en la base de datos (si no existe)
       if (!track.duration) {
         await supabase
           .from('tracks')
@@ -231,19 +230,26 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     source.connect(gainNode)
     gainNode.connect(masterGainRef.current)
     
-    audioNodesRef.current.push({
+    const nodeData = {
       node: gainNode,
       source: source,
       trackId: track.id,
-      buffer: audioBuffer
-    })
+      buffer: audioBuffer,
+      isStopped: false // ✅ Para saber si fue detenido manualmente
+    }
     
+    audioNodesRef.current.push(nodeData)
+    
+    // ✅ onended solo se ejecuta cuando la pista termina naturalmente
     source.onended = () => {
-      const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
-      if (index !== -1) {
-        audioNodesRef.current.splice(index, 1)
-        if (audioNodesRef.current.length === 0) {
-          setIsPlaying(false)
+      // Solo eliminar si no fue detenido manualmente
+      if (!nodeData.isStopped) {
+        const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
+        if (index !== -1) {
+          audioNodesRef.current.splice(index, 1)
+          if (audioNodesRef.current.length === 0) {
+            setIsPlaying(false)
+          }
         }
       }
     }
@@ -254,6 +260,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   const playAllSelectedTracks = async () => {
     stopAllAudio()
+    isStoppedRef.current = false
     
     if (selectedTracks.size === 0) {
       alert('Selecciona al menos una pista para reproducir')
@@ -281,9 +288,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   }
 
   const stopAllAudio = () => {
-    audioNodesRef.current.forEach(({ source }) => {
+    isStoppedRef.current = true
+    
+    audioNodesRef.current.forEach((nodeData) => {
+      nodeData.isStopped = true // ✅ Marcar como detenido manualmente
       try {
-        source.stop()
+        nodeData.source.stop()
       } catch (e) {}
     })
     audioNodesRef.current = []
