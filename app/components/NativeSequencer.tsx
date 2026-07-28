@@ -16,7 +16,7 @@ interface NativeSequencerProps {
   isPlaying: boolean;
   onPlay: () => void;
   onStop: () => void;
-  onLoopToggle: () => void;  // ✅ Añadido
+  onLoopToggle: () => void;
   loopEnabled: boolean;
   masterVolume: number;
   onMasterVolumeChange: (value: number) => void;
@@ -30,7 +30,7 @@ export default function NativeSequencer({
   isPlaying,
   onPlay,
   onStop,
-  onLoopToggle,  // ✅ Añadido
+  onLoopToggle,
   loopEnabled,
   masterVolume,
   onMasterVolumeChange,
@@ -40,10 +40,13 @@ export default function NativeSequencer({
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
   const [waveforms, setWaveforms] = useState<Record<string, number[]>>({});
+  const [isDragging, setIsDragging] = useState(false);
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
+  const timelineRef = useRef<HTMLDivElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioBuffersRef = useRef<Record<string, AudioBuffer>>({});
 
   // ✅ Calcular duración total
   useEffect(() => {
@@ -57,7 +60,7 @@ export default function NativeSequencer({
     setTotalDuration(maxDuration || 1);
   }, [tracks, selectedTracks]);
 
-  // ✅ Generar forma de onda (sin librerías)
+  // ✅ Generar forma de onda
   useEffect(() => {
     const generateWaveform = async (track: Track) => {
       try {
@@ -66,9 +69,11 @@ export default function NativeSequencer({
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         
-        // Extraer datos de la forma de onda
+        // Guardar buffer para reproducción
+        audioBuffersRef.current[track.id] = audioBuffer;
+        
         const channelData = audioBuffer.getChannelData(0);
-        const samples = 150; // Número de puntos para la visualización
+        const samples = 150;
         const blockSize = Math.floor(channelData.length / samples);
         const waveform: number[] = [];
         
@@ -86,7 +91,6 @@ export default function NativeSequencer({
           [track.id]: waveform
         }));
         
-        // Guardar duración
         if (!track.duration) {
           await fetch(`/api/tracks/${track.id}/duration`, {
             method: 'POST',
@@ -107,7 +111,7 @@ export default function NativeSequencer({
     });
   }, [tracks, selectedTracks]);
 
-  // ✅ Dibujar formas de onda en Canvas
+  // ✅ Dibujar formas de onda
   useEffect(() => {
     Object.keys(canvasRefs.current).forEach(trackId => {
       const canvas = canvasRefs.current[trackId];
@@ -116,16 +120,15 @@ export default function NativeSequencer({
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         
+        const rect = canvas.getBoundingClientRect();
         const width = canvas.width;
         const height = canvas.height;
         
         ctx.clearRect(0, 0, width, height);
         
-        // Fondo
         ctx.fillStyle = 'rgba(255,255,255,0.05)';
         ctx.fillRect(0, 0, width, height);
         
-        // Forma de onda
         const barWidth = width / waveform.length;
         const mid = height / 2;
         
@@ -134,28 +137,94 @@ export default function NativeSequencer({
           const barHeight = Math.max(1, value * height * 0.8);
           const y = mid - barHeight / 2;
           
-          // Color según si está sonando
           const isTrackPlaying = isPlaying && selectedTracks.has(trackId);
-          const gradient = ctx.createLinearGradient(x, y, x, y + barHeight);
+          const progress = totalDuration > 0 ? currentTime / totalDuration : 0;
+          const isPlayed = x / width < progress;
           
-          if (isTrackPlaying) {
-            gradient.addColorStop(0, '#10b981');
-            gradient.addColorStop(1, '#059669');
+          if (isTrackPlaying && isPlayed) {
+            ctx.fillStyle = '#10b981';
+          } else if (isTrackPlaying) {
+            ctx.fillStyle = '#4a5568';
           } else {
-            gradient.addColorStop(0, '#6b7280');
-            gradient.addColorStop(1, '#4b5563');
+            ctx.fillStyle = '#6b7280';
           }
           
-          ctx.fillStyle = gradient;
           ctx.fillRect(x, y, barWidth - 1, barHeight);
         });
       }
     });
-  }, [waveforms, isPlaying, selectedTracks]);
+  }, [waveforms, isPlaying, selectedTracks, currentTime, totalDuration]);
+
+  // ✅ Reproducir desde una posición específica
+  const playFromPosition = (position: number) => {
+    // Detener todo
+    onStop();
+    
+    // Establecer nueva posición
+    const newTime = Math.max(0, Math.min(position, totalDuration));
+    setCurrentTime(newTime);
+    
+    // Iniciar reproducción
+    setTimeout(() => {
+      onPlay();
+    }, 100);
+  };
+
+  // ✅ Manejar clic en la línea de tiempo
+  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!timelineRef.current) return;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    const newTime = percentage * totalDuration;
+    
+    if (isPlaying) {
+      playFromPosition(newTime);
+    } else {
+      setCurrentTime(newTime);
+    }
+  };
+
+  // ✅ Manejar arrastre en la línea de tiempo
+  const handleTimelineMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDragging(true);
+    handleTimelineClick(e);
+  };
+
+  const handleTimelineMouseMove = (e: MouseEvent) => {
+    if (!isDragging || !timelineRef.current) return;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    const newTime = percentage * totalDuration;
+    
+    setCurrentTime(newTime);
+  };
+
+  const handleTimelineMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleTimelineMouseMove);
+      document.addEventListener('mouseup', handleTimelineMouseUp);
+    } else {
+      document.removeEventListener('mousemove', handleTimelineMouseMove);
+      document.removeEventListener('mouseup', handleTimelineMouseUp);
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleTimelineMouseMove);
+      document.removeEventListener('mouseup', handleTimelineMouseUp);
+    };
+  }, [isDragging]);
 
   // ✅ Actualizar progreso
   useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying && !isDragging) {
       startTimeRef.current = Date.now() - currentTime * 1000;
       
       const updateProgress = () => {
@@ -163,58 +232,10 @@ export default function NativeSequencer({
         const newTime = Math.min(elapsed, totalDuration);
         setCurrentTime(newTime);
         
-        // Actualizar las formas de onda
-        Object.keys(canvasRefs.current).forEach(trackId => {
-          const canvas = canvasRefs.current[trackId];
-          if (canvas) {
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return;
-            
-            const waveform = waveforms[trackId];
-            if (!waveform) return;
-            
-            // Redibujar con la posición actual
-            const width = canvas.width;
-            const height = canvas.height;
-            const progress = totalDuration > 0 ? newTime / totalDuration : 0;
-            const progressWidth = progress * width;
-            
-            // Fondo (solo para limpiar)
-            ctx.clearRect(0, 0, width, height);
-            ctx.fillStyle = 'rgba(255,255,255,0.05)';
-            ctx.fillRect(0, 0, width, height);
-            
-            // Forma de onda
-            const barWidth = width / waveform.length;
-            const mid = height / 2;
-            
-            waveform.forEach((value, index) => {
-              const x = index * barWidth;
-              const barHeight = Math.max(1, value * height * 0.8);
-              const y = mid - barHeight / 2;
-              
-              // ✅ Color según progreso
-              const isTrackPlaying = isPlaying && selectedTracks.has(trackId);
-              const isPlayed = x < progressWidth;
-              
-              if (isTrackPlaying && isPlayed) {
-                ctx.fillStyle = '#10b981';
-              } else if (isTrackPlaying) {
-                ctx.fillStyle = '#4a5568';
-              } else {
-                ctx.fillStyle = '#6b7280';
-              }
-              
-              ctx.fillRect(x, y, barWidth - 1, barHeight);
-            });
-          }
-        });
-        
         if (newTime < totalDuration) {
           animationRef.current = requestAnimationFrame(updateProgress);
         } else {
           if (loopEnabled) {
-            // Loop: reiniciar
             setCurrentTime(0);
             startTimeRef.current = Date.now();
             animationRef.current = requestAnimationFrame(updateProgress);
@@ -238,7 +259,7 @@ export default function NativeSequencer({
         animationRef.current = null;
       }
     };
-  }, [isPlaying, totalDuration, loopEnabled, waveforms]);
+  }, [isPlaying, totalDuration, loopEnabled, isDragging]);
 
   // ✅ Formatear tiempo
   const formatTime = (seconds: number) => {
@@ -248,9 +269,7 @@ export default function NativeSequencer({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // ✅ Barra de progreso
   const progressPercentage = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
-
   const visibleTracks = tracks.filter(t => selectedTracks.has(t.id));
 
   if (visibleTracks.length === 0) {
@@ -356,33 +375,140 @@ export default function NativeSequencer({
         </button>
       </div>
 
-      {/* Línea de tiempo */}
+      {/* Controles de navegación + Línea de tiempo */}
       <div style={{ marginBottom: '12px' }}>
+        {/* Botones de navegación */}
         <div style={{
           display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: 12,
-          color: '#6b7280',
-          marginBottom: '4px'
+          alignItems: 'center',
+          gap: '6px',
+          marginBottom: '8px',
+          justifyContent: 'center'
         }}>
-          <span>⏱️ {formatTime(currentTime)}</span>
-          <span>⏱️ {formatTime(totalDuration)}</span>
+          <button
+            onClick={() => setCurrentTime(0)}
+            style={{
+              padding: '4px 10px',
+              background: 'rgba(255,255,255,0.05)',
+              color: '#6b7280',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+            title="Ir al inicio"
+          >
+            ⏮
+          </button>
+          <button
+            onClick={() => {
+              const newTime = Math.max(0, currentTime - 5);
+              if (isPlaying) {
+                playFromPosition(newTime);
+              } else {
+                setCurrentTime(newTime);
+              }
+            }}
+            style={{
+              padding: '4px 10px',
+              background: 'rgba(255,255,255,0.05)',
+              color: '#6b7280',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+            title="Retroceder 5 segundos"
+          >
+            ⏪
+          </button>
+          <button
+            onClick={() => {
+              const newTime = Math.min(totalDuration, currentTime + 5);
+              if (isPlaying) {
+                playFromPosition(newTime);
+              } else {
+                setCurrentTime(newTime);
+              }
+            }}
+            style={{
+              padding: '4px 10px',
+              background: 'rgba(255,255,255,0.05)',
+              color: '#6b7280',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+            title="Adelantar 5 segundos"
+          >
+            ⏩
+          </button>
+          <button
+            onClick={() => setCurrentTime(totalDuration)}
+            style={{
+              padding: '4px 10px',
+              background: 'rgba(255,255,255,0.05)',
+              color: '#6b7280',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+            title="Ir al final"
+          >
+            ⏭
+          </button>
         </div>
-        <div style={{
-          width: '100%',
-          height: '6px',
-          background: 'rgba(255,255,255,0.1)',
-          borderRadius: 3,
-          overflow: 'hidden',
-          position: 'relative'
-        }}>
+
+        {/* Línea de tiempo interactiva */}
+        <div>
           <div style={{
-            width: `${progressPercentage}%`,
-            height: '100%',
-            background: '#10b981',
-            borderRadius: 3,
-            transition: 'width 0.1s linear'
-          }} />
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: 12,
+            color: '#6b7280',
+            marginBottom: '4px'
+          }}>
+            <span>⏱️ {formatTime(currentTime)}</span>
+            <span>⏱️ {formatTime(totalDuration)}</span>
+          </div>
+          <div
+            ref={timelineRef}
+            onClick={handleTimelineClick}
+            onMouseDown={handleTimelineMouseDown}
+            style={{
+              width: '100%',
+              height: '20px',
+              background: 'rgba(255,255,255,0.05)',
+              borderRadius: 4,
+              overflow: 'hidden',
+              position: 'relative',
+              cursor: 'pointer'
+            }}
+          >
+            {/* Barra de progreso */}
+            <div style={{
+              width: `${progressPercentage}%`,
+              height: '100%',
+              background: 'rgba(16,185,129,0.3)',
+              borderRadius: 4,
+              transition: isDragging ? 'none' : 'width 0.1s linear'
+            }} />
+            
+            {/* Marcador de posición */}
+            <div style={{
+              position: 'absolute',
+              left: `${progressPercentage}%`,
+              top: 0,
+              width: '4px',
+              height: '100%',
+              background: '#10b981',
+              borderRadius: 2,
+              transform: 'translateX(-2px)',
+              transition: isDragging ? 'none' : 'left 0.1s linear'
+            }} />
+          </div>
         </div>
       </div>
 
@@ -468,7 +594,7 @@ export default function NativeSequencer({
                 </span>
               </div>
               
-              {/* ✅ Canvas para forma de onda nativa */}
+              {/* Canvas para forma de onda */}
               <canvas
                 ref={(el) => { canvasRefs.current[track.id] = el; }}
                 width={800}
