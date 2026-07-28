@@ -51,6 +51,7 @@ export default function NativeSequencer({
   const masterGainRef = useRef<GainNode | null>(null);
   const isPlayingRef = useRef(false);
   const startTimeRef = useRef(0);
+  const trackDurationsRef = useRef<Record<string, number>>({});
 
   // ✅ Inicializar AudioContext
   const initAudioContext = () => {
@@ -63,19 +64,21 @@ export default function NativeSequencer({
     return audioContextRef.current;
   };
 
-  // ✅ Calcular duración total
+  // ✅ Calcular duración total (la más larga)
   useEffect(() => {
     const selected = tracks.filter(t => selectedTracks.has(t.id));
     let maxDuration = 0;
     selected.forEach(track => {
-      if (track.duration && track.duration > maxDuration) {
-        maxDuration = track.duration;
+      const duration = trackDurationsRef.current[track.id] || track.duration || 0;
+      if (duration > maxDuration) {
+        maxDuration = duration;
       }
     });
+    // Si no hay duración, usar 1 segundo como fallback
     setTotalDuration(maxDuration || 1);
-  }, [tracks, selectedTracks]);
+  }, [tracks, selectedTracks, trackDurationsRef.current]);
 
-  // ✅ Generar forma de onda
+  // ✅ Generar forma de onda y cargar buffers
   useEffect(() => {
     const generateWaveform = async (track: Track) => {
       try {
@@ -85,7 +88,18 @@ export default function NativeSequencer({
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
         
         audioBuffersRef.current[track.id] = audioBuffer;
+        trackDurationsRef.current[track.id] = audioBuffer.duration;
         
+        // ✅ Actualizar duración total
+        const selected = tracks.filter(t => selectedTracks.has(t.id));
+        let maxDuration = 0;
+        selected.forEach(t => {
+          const d = trackDurationsRef.current[t.id] || t.duration || 0;
+          if (d > maxDuration) maxDuration = d;
+        });
+        setTotalDuration(maxDuration || 1);
+        
+        // Generar waveform
         const channelData = audioBuffer.getChannelData(0);
         const samples = 150;
         const blockSize = Math.floor(channelData.length / samples);
@@ -127,20 +141,17 @@ export default function NativeSequencer({
 
   // ✅ Reproducir desde una posición
   const playFromPosition = (position: number) => {
-    // Detener todo
     stopPlayback();
     
-    // Establecer nueva posición
     const newTime = Math.max(0, Math.min(position, totalDuration));
     setCurrentTime(newTime);
     
-    // Iniciar reproducción
     setTimeout(() => {
       startPlayback(newTime);
     }, 50);
   };
 
-  // ✅ Iniciar reproducción real
+  // ✅ Iniciar reproducción real con Web Audio API
   const startPlayback = (startTime: number = 0) => {
     const ctx = initAudioContext();
     
@@ -155,7 +166,7 @@ export default function NativeSequencer({
     const selected = tracks.filter(t => selectedTracks.has(t.id));
     if (selected.length === 0) return;
 
-    // Calcular duración máxima
+    // ✅ Usar la duración más larga para el tiempo total
     let maxDuration = 0;
     selected.forEach(track => {
       const buffer = audioBuffersRef.current[track.id];
@@ -163,7 +174,9 @@ export default function NativeSequencer({
         maxDuration = buffer.duration;
       }
     });
+    setTotalDuration(maxDuration || 1);
 
+    // ✅ Reproducir cada pista seleccionada
     selected.forEach(track => {
       const buffer = audioBuffersRef.current[track.id];
       if (!buffer) return;
@@ -182,7 +195,8 @@ export default function NativeSequencer({
       sourceNodesRef.current[track.id] = source;
       gainNodesRef.current[track.id] = gainNode;
       
-      const offset = Math.min(startTime, buffer.duration - 0.1);
+      // ✅ Reproducir desde la posición actual hasta el final
+      const offset = Math.min(startTime, buffer.duration);
       source.start(0, offset);
     });
 
@@ -194,6 +208,7 @@ export default function NativeSequencer({
       cancelAnimationFrame(animationRef.current);
     }
 
+    // ✅ Actualizar progreso
     const updateProgress = () => {
       if (!isPlayingRef.current) return;
       
@@ -203,13 +218,43 @@ export default function NativeSequencer({
         const newTime = Math.min(elapsed, totalDuration);
         setCurrentTime(newTime);
         
-        if (newTime < totalDuration) {
-          animationRef.current = requestAnimationFrame(updateProgress);
-        } else if (loopEnabled) {
-          startTimeRef.current = ctx.currentTime;
-          animationRef.current = requestAnimationFrame(updateProgress);
+        // ✅ Verificar si todas las pistas han terminado
+        const allFinished = selected.every(track => {
+          const buffer = audioBuffersRef.current[track.id];
+          if (!buffer) return true;
+          const offset = Math.min(startTime, buffer.duration);
+          return elapsed >= (buffer.duration - offset);
+        });
+        
+        if (allFinished) {
+          if (loopEnabled) {
+            // ✅ Loop: reiniciar todas las pistas
+            startTimeRef.current = ctx.currentTime;
+            // Reiniciar cada pista
+            selected.forEach(track => {
+              const buffer = audioBuffersRef.current[track.id];
+              if (!buffer) return;
+              try {
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.loop = loopEnabled;
+                const gainNode = ctx.createGain();
+                gainNode.gain.value = trackVolumes[track.id] || 0.8;
+                source.connect(gainNode);
+                gainNode.connect(masterGainRef.current!);
+                sourceNodesRef.current[track.id] = source;
+                gainNodesRef.current[track.id] = gainNode;
+                source.start(0);
+              } catch (e) {}
+            });
+            animationRef.current = requestAnimationFrame(updateProgress);
+          } else {
+            // ✅ Sin loop: detener todo
+            stopPlayback();
+            setCurrentTime(totalDuration);
+          }
         } else {
-          stopPlayback();
+          animationRef.current = requestAnimationFrame(updateProgress);
         }
       } else {
         animationRef.current = requestAnimationFrame(updateProgress);
