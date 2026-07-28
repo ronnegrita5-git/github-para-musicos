@@ -30,6 +30,8 @@ export default function VisualSequencer({
   const [waveforms, setWaveforms] = useState<Record<string, number[]>>({});
   const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // ✅ Ref para forzar redibujo cuando cambia la selección
+  const drawTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // ✅ Generar formas de onda
   useEffect(() => {
@@ -41,7 +43,6 @@ export default function VisualSequencer({
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
         
         const channelData = audioBuffer.getChannelData(0);
-        // ✅ Muestras fijas para todas las pistas (para mantener consistencia)
         const samples = 200;
         const blockSize = Math.floor(channelData.length / samples);
         const waveform: number[] = [];
@@ -72,8 +73,27 @@ export default function VisualSequencer({
     });
   }, [tracks, selectedTracks]);
 
-  // ✅ Dibujar formas de onda - CADA PISTA ESCALA SEGÚN SU DURACIÓN
+  // ✅ Dibujar formas de onda - se ejecuta cada vez que cambia totalDuration o waveforms
   useEffect(() => {
+    // ✅ Limpiar timeout anterior
+    if (drawTimeoutRef.current) {
+      clearTimeout(drawTimeoutRef.current);
+    }
+    
+    // ✅ Pequeño delay para asegurar que todos los canvases están listos
+    drawTimeoutRef.current = setTimeout(() => {
+      drawWaveforms();
+    }, 50);
+    
+    return () => {
+      if (drawTimeoutRef.current) {
+        clearTimeout(drawTimeoutRef.current);
+      }
+    };
+  }, [waveforms, currentTime, tracks, totalDuration, selectedTracks]);
+
+  // ✅ Función de dibujo separada para poder llamarla cuando sea necesario
+  const drawWaveforms = () => {
     Object.keys(canvasRefs.current).forEach(trackId => {
       const canvas = canvasRefs.current[trackId];
       const waveform = waveforms[trackId];
@@ -88,33 +108,27 @@ export default function VisualSequencer({
         
         ctx.clearRect(0, 0, width, height);
         
-        // ✅ Fondo más oscuro para la zona no ocupada
+        // Fondo
         ctx.fillStyle = 'rgba(255,255,255,0.02)';
         ctx.fillRect(0, 0, width, height);
         
         const trackDuration = track.duration || 1;
-        // ✅ Progreso de esta pista específica (0 a 1)
         const trackProgress = Math.min(currentTime / trackDuration, 1);
-        // ✅ Si la pista ya terminó, está completamente verde
         const isFinished = trackProgress >= 1 && trackDuration > 0;
         
-        // ✅ ESCALA: ancho proporcional a la duración de la pista
-        // La pista más larga ocupa el 100% del ancho
+        // ✅ ESCALA: proporcional a la duración de la pista RELATIVA a totalDuration
         const maxDuration = totalDuration || 1;
         const scaleFactor = Math.min(trackDuration / maxDuration, 1);
         const scaledWidth = width * scaleFactor;
-        // ✅ Offset para centrar (o alinear a la izquierda)
-        const offsetX = 0; // Alinear a la izquierda
         
         const barWidth = scaledWidth / waveform.length;
         const mid = height / 2;
         
         waveform.forEach((value, index) => {
-          const x = offsetX + index * barWidth;
+          const x = index * barWidth;
           const barHeight = Math.max(1, value * height * 0.8);
           const y = mid - barHeight / 2;
           
-          // ✅ Progreso relativo a la duración de esta pista
           const isPlayed = x / scaledWidth < trackProgress;
           
           if (isFinished) {
@@ -127,13 +141,13 @@ export default function VisualSequencer({
           ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
         });
         
-        // ✅ Si la pista es más corta, dibujar un área gris al final
+        // ✅ Área gris para el espacio no ocupado por la pista
         if (scaleFactor < 1) {
           ctx.fillStyle = 'rgba(255,255,255,0.03)';
           ctx.fillRect(scaledWidth, 0, width - scaledWidth, height);
           
-          // ✅ Línea vertical que indica el final de la pista
-          ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+          // Línea de final de pista
+          ctx.strokeStyle = 'rgba(255,255,255,0.15)';
           ctx.lineWidth = 1;
           ctx.setLineDash([4, 4]);
           ctx.beginPath();
@@ -143,15 +157,15 @@ export default function VisualSequencer({
           ctx.setLineDash([]);
         }
         
-        // ✅ Mostrar duración al final de la barra
+        // Mostrar duración al final
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.font = '9px monospace';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(formatTime(trackDuration), scaledWidth - 4, height - 2);
+        ctx.fillText(formatTime(trackDuration), Math.min(scaledWidth - 4, width - 4), height - 2);
       }
     });
-  }, [waveforms, currentTime, tracks, totalDuration]);
+  };
 
   // ✅ Formatear tiempo
   const formatTime = (seconds: number) => {
@@ -304,7 +318,6 @@ export default function VisualSequencer({
                 {isFinished && (
                   <span style={{ fontSize: 10, color: '#10b981', marginLeft: 'auto' }}>✅ Terminada</span>
                 )}
-                {/* ✅ Mostrar progreso de la pista */}
                 {trackDuration > 0 && (
                   <span style={{
                     fontSize: 10,
@@ -315,7 +328,7 @@ export default function VisualSequencer({
                     {isFinished ? formatTime(trackDuration) : `${formatTime(trackDuration * trackProgress)} / ${formatTime(trackDuration)}`}
                   </span>
                 )}
-                {/* ✅ Barra de progreso individual */}
+                {/* Barra de progreso individual */}
                 {trackDuration > 0 && (
                   <div style={{
                     width: '60px',
@@ -334,7 +347,7 @@ export default function VisualSequencer({
                   </div>
                 )}
               </div>
-              {/* ✅ Canvas con escala proporcional a la duración */}
+              {/* Canvas con escala proporcional */}
               <div style={{ position: 'relative', width: '100%' }}>
                 <canvas
                   ref={(el) => { canvasRefs.current[track.id] = el; }}
@@ -348,20 +361,6 @@ export default function VisualSequencer({
                     display: 'block'
                   }}
                 />
-                {/* ✅ Indicador visual de duración relativa */}
-                {trackDuration > 0 && (
-                  <div style={{
-                    position: 'absolute',
-                    right: '4px',
-                    bottom: '2px',
-                    fontSize: 8,
-                    color: 'rgba(255,255,255,0.2)',
-                    pointerEvents: 'none',
-                    fontFamily: 'monospace'
-                  }}>
-                    {formatTime(trackDuration)}
-                  </div>
-                )}
               </div>
             </div>
           );
