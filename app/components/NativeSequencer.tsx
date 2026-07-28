@@ -47,6 +47,21 @@ export default function NativeSequencer({
   const startTimeRef = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBuffersRef = useRef<Record<string, AudioBuffer>>({});
+  const sourceNodesRef = useRef<Record<string, AudioBufferSourceNode>>({});
+  const gainNodesRef = useRef<Record<string, GainNode>>({});
+  const masterGainRef = useRef<GainNode | null>(null);
+  const isPlayingRef = useRef(false);
+
+  // ✅ Inicializar AudioContext
+  const initAudioContext = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+    return audioContextRef.current;
+  };
 
   // ✅ Calcular duración total
   useEffect(() => {
@@ -60,16 +75,15 @@ export default function NativeSequencer({
     setTotalDuration(maxDuration || 1);
   }, [tracks, selectedTracks]);
 
-  // ✅ Generar forma de onda
+  // ✅ Generar forma de onda y cargar buffers de audio
   useEffect(() => {
     const generateWaveform = async (track: Track) => {
       try {
         const response = await fetch(track.audio_url);
         const arrayBuffer = await response.arrayBuffer();
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        const ctx = initAudioContext();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
         
-        // Guardar buffer para reproducción
         audioBuffersRef.current[track.id] = audioBuffer;
         
         const channelData = audioBuffer.getChannelData(0);
@@ -111,6 +125,91 @@ export default function NativeSequencer({
     });
   }, [tracks, selectedTracks]);
 
+  // ✅ Reproducir desde una posición específica
+  const playFromPosition = (position: number) => {
+    // ✅ Detener todo
+    stopPlayback();
+    
+    // ✅ Establecer nueva posición
+    const newTime = Math.max(0, Math.min(position, totalDuration));
+    setCurrentTime(newTime);
+    
+    // ✅ Iniciar reproducción
+    setTimeout(() => {
+      startPlayback(newTime);
+    }, 50);
+  };
+
+  // ✅ Iniciar reproducción real con Web Audio API
+  const startPlayback = (startTime: number = 0) => {
+    const ctx = initAudioContext();
+    
+    // Crear master gain si no existe
+    if (!masterGainRef.current) {
+      masterGainRef.current = ctx.createGain();
+      masterGainRef.current.gain.value = masterVolume;
+      masterGainRef.current.connect(ctx.destination);
+    } else {
+      masterGainRef.current.gain.value = masterVolume;
+    }
+
+    // Detener cualquier reproducción anterior
+    stopPlayback();
+
+    const selected = tracks.filter(t => selectedTracks.has(t.id));
+    if (selected.length === 0) return;
+
+    // Crear nodos para cada pista seleccionada
+    selected.forEach(track => {
+      const buffer = audioBuffersRef.current[track.id];
+      if (!buffer) return;
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = loopEnabled;
+      
+      const gainNode = ctx.createGain();
+      const volume = trackVolumes[track.id] || 0.8;
+      gainNode.gain.value = volume;
+      
+      source.connect(gainNode);
+      gainNode.connect(masterGainRef.current!);
+      
+      // Guardar referencias
+      sourceNodesRef.current[track.id] = source;
+      gainNodesRef.current[track.id] = gainNode;
+      
+      // Iniciar desde la posición actual
+      source.start(0, startTime);
+    });
+
+    isPlayingRef.current = true;
+    onPlay();
+  };
+
+  // ✅ Detener reproducción real
+  const stopPlayback = () => {
+    Object.values(sourceNodesRef.current).forEach(source => {
+      try {
+        source.stop();
+      } catch (e) {}
+    });
+    sourceNodesRef.current = {};
+    gainNodesRef.current = {};
+    isPlayingRef.current = false;
+    onStop();
+  };
+
+  // ✅ Navegar a una posición
+  const seekTo = (position: number) => {
+    const newTime = Math.max(0, Math.min(position, totalDuration));
+    setCurrentTime(newTime);
+    
+    if (isPlayingRef.current) {
+      playFromPosition(newTime);
+    }
+  };
+
   // ✅ Dibujar formas de onda
   useEffect(() => {
     Object.keys(canvasRefs.current).forEach(trackId => {
@@ -120,7 +219,6 @@ export default function NativeSequencer({
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         
-        const rect = canvas.getBoundingClientRect();
         const width = canvas.width;
         const height = canvas.height;
         
@@ -155,73 +253,6 @@ export default function NativeSequencer({
     });
   }, [waveforms, isPlaying, selectedTracks, currentTime, totalDuration]);
 
-  // ✅ Reproducir desde una posición específica
-  const playFromPosition = (position: number) => {
-    // Detener todo
-    onStop();
-    
-    // Establecer nueva posición
-    const newTime = Math.max(0, Math.min(position, totalDuration));
-    setCurrentTime(newTime);
-    
-    // Iniciar reproducción
-    setTimeout(() => {
-      onPlay();
-    }, 100);
-  };
-
-  // ✅ Manejar clic en la línea de tiempo
-  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!timelineRef.current) return;
-    
-    const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = Math.max(0, Math.min(1, x / rect.width));
-    const newTime = percentage * totalDuration;
-    
-    if (isPlaying) {
-      playFromPosition(newTime);
-    } else {
-      setCurrentTime(newTime);
-    }
-  };
-
-  // ✅ Manejar arrastre en la línea de tiempo
-  const handleTimelineMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    setIsDragging(true);
-    handleTimelineClick(e);
-  };
-
-  const handleTimelineMouseMove = (e: MouseEvent) => {
-    if (!isDragging || !timelineRef.current) return;
-    
-    const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = Math.max(0, Math.min(1, x / rect.width));
-    const newTime = percentage * totalDuration;
-    
-    setCurrentTime(newTime);
-  };
-
-  const handleTimelineMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  useEffect(() => {
-    if (isDragging) {
-      document.addEventListener('mousemove', handleTimelineMouseMove);
-      document.addEventListener('mouseup', handleTimelineMouseUp);
-    } else {
-      document.removeEventListener('mousemove', handleTimelineMouseMove);
-      document.removeEventListener('mouseup', handleTimelineMouseUp);
-    }
-    
-    return () => {
-      document.removeEventListener('mousemove', handleTimelineMouseMove);
-      document.removeEventListener('mouseup', handleTimelineMouseUp);
-    };
-  }, [isDragging]);
-
   // ✅ Actualizar progreso
   useEffect(() => {
     if (isPlaying && !isDragging) {
@@ -240,7 +271,7 @@ export default function NativeSequencer({
             startTimeRef.current = Date.now();
             animationRef.current = requestAnimationFrame(updateProgress);
           } else {
-            onStop();
+            stopPlayback();
           }
         }
       };
@@ -260,6 +291,58 @@ export default function NativeSequencer({
       }
     };
   }, [isPlaying, totalDuration, loopEnabled, isDragging]);
+
+  // ✅ Manejar clic en la línea de tiempo
+  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!timelineRef.current) return;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    const newTime = percentage * totalDuration;
+    
+    seekTo(newTime);
+  };
+
+  const handleTimelineMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDragging(true);
+    handleTimelineClick(e);
+  };
+
+  const handleTimelineMouseMove = (e: MouseEvent) => {
+    if (!isDragging || !timelineRef.current) return;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    const newTime = percentage * totalDuration;
+    
+    setCurrentTime(newTime);
+  };
+
+  const handleTimelineMouseUp = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      if (isPlayingRef.current) {
+        playFromPosition(currentTime);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleTimelineMouseMove);
+      document.addEventListener('mouseup', handleTimelineMouseUp);
+    } else {
+      document.removeEventListener('mousemove', handleTimelineMouseMove);
+      document.removeEventListener('mouseup', handleTimelineMouseUp);
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleTimelineMouseMove);
+      document.removeEventListener('mouseup', handleTimelineMouseUp);
+    };
+  }, [isDragging]);
 
   // ✅ Formatear tiempo
   const formatTime = (seconds: number) => {
@@ -319,7 +402,13 @@ export default function NativeSequencer({
             max="1"
             step="0.01"
             value={masterVolume}
-            onChange={(e) => onMasterVolumeChange(parseFloat(e.target.value))}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              onMasterVolumeChange(val);
+              if (masterGainRef.current) {
+                masterGainRef.current.gain.value = val;
+              }
+            }}
             style={{ width: 100, accentColor: '#10b981' }}
           />
           <span style={{ fontSize: 12, color: '#6b7280', minWidth: 35 }}>
@@ -328,7 +417,15 @@ export default function NativeSequencer({
         </div>
         
         <button
-          onClick={onLoopToggle}
+          onClick={() => {
+            onLoopToggle();
+            // Actualizar loop en las fuentes existentes
+            Object.values(sourceNodesRef.current).forEach(source => {
+              try {
+                source.loop = !loopEnabled;
+              } catch (e) {}
+            });
+          }}
           style={{
             padding: '4px 12px',
             background: loopEnabled ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.05)',
@@ -343,7 +440,10 @@ export default function NativeSequencer({
         </button>
         
         <button
-          onClick={onStop}
+          onClick={() => {
+            stopPlayback();
+            setCurrentTime(0);
+          }}
           style={{
             padding: '6px 16px',
             background: '#ef4444',
@@ -359,7 +459,13 @@ export default function NativeSequencer({
         </button>
         
         <button
-          onClick={onPlay}
+          onClick={() => {
+            if (isPlayingRef.current) {
+              stopPlayback();
+            } else {
+              startPlayback(currentTime);
+            }
+          }}
           style={{
             padding: '6px 16px',
             background: isPlaying ? '#fbbf24' : '#10b981',
@@ -371,7 +477,7 @@ export default function NativeSequencer({
             fontWeight: 'bold'
           }}
         >
-          {isPlaying ? '🔊 Reproduciendo' : '▶️ Reproducir'}
+          {isPlaying ? '⏸ Pausa' : '▶️ Reproducir'}
         </button>
       </div>
 
@@ -386,7 +492,7 @@ export default function NativeSequencer({
           justifyContent: 'center'
         }}>
           <button
-            onClick={() => setCurrentTime(0)}
+            onClick={() => seekTo(0)}
             style={{
               padding: '4px 10px',
               background: 'rgba(255,255,255,0.05)',
@@ -398,16 +504,12 @@ export default function NativeSequencer({
             }}
             title="Ir al inicio"
           >
-            ⏮
+            ⏮️
           </button>
           <button
             onClick={() => {
               const newTime = Math.max(0, currentTime - 5);
-              if (isPlaying) {
-                playFromPosition(newTime);
-              } else {
-                setCurrentTime(newTime);
-              }
+              seekTo(newTime);
             }}
             style={{
               padding: '4px 10px',
@@ -425,11 +527,7 @@ export default function NativeSequencer({
           <button
             onClick={() => {
               const newTime = Math.min(totalDuration, currentTime + 5);
-              if (isPlaying) {
-                playFromPosition(newTime);
-              } else {
-                setCurrentTime(newTime);
-              }
+              seekTo(newTime);
             }}
             style={{
               padding: '4px 10px',
@@ -445,7 +543,7 @@ export default function NativeSequencer({
             ⏩
           </button>
           <button
-            onClick={() => setCurrentTime(totalDuration)}
+            onClick={() => seekTo(totalDuration)}
             style={{
               padding: '4px 10px',
               background: 'rgba(255,255,255,0.05)',
@@ -457,7 +555,7 @@ export default function NativeSequencer({
             }}
             title="Ir al final"
           >
-            ⏭
+            ⏭️
           </button>
         </div>
 
@@ -487,7 +585,6 @@ export default function NativeSequencer({
               cursor: 'pointer'
             }}
           >
-            {/* Barra de progreso */}
             <div style={{
               width: `${progressPercentage}%`,
               height: '100%',
@@ -496,7 +593,6 @@ export default function NativeSequencer({
               transition: isDragging ? 'none' : 'width 0.1s linear'
             }} />
             
-            {/* Marcador de posición */}
             <div style={{
               position: 'absolute',
               left: `${progressPercentage}%`,
@@ -579,7 +675,13 @@ export default function NativeSequencer({
                   max="1"
                   step="0.01"
                   value={volume}
-                  onChange={(e) => onTrackVolumeChange(track.id, parseFloat(e.target.value))}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    onTrackVolumeChange(track.id, val);
+                    if (gainNodesRef.current[track.id]) {
+                      gainNodesRef.current[track.id].gain.value = val;
+                    }
+                  }}
                   style={{
                     width: 60,
                     accentColor: '#10b981'
@@ -594,7 +696,6 @@ export default function NativeSequencer({
                 </span>
               </div>
               
-              {/* Canvas para forma de onda */}
               <canvas
                 ref={(el) => { canvasRefs.current[track.id] = el; }}
                 width={800}
