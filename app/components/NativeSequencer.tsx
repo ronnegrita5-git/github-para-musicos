@@ -16,7 +16,7 @@ interface NativeSequencerProps {
   isPlaying: boolean;
   onPlay: () => void;
   onStop: () => void;
-  onLoopToggle: () => void;
+  onLoopToggle: () => void;  // ✅ Añadido
   loopEnabled: boolean;
   masterVolume: number;
   onMasterVolumeChange: (value: number) => void;
@@ -30,6 +30,7 @@ export default function NativeSequencer({
   isPlaying,
   onPlay,
   onStop,
+  onLoopToggle,  // ✅ Añadido
   loopEnabled,
   masterVolume,
   onMasterVolumeChange,
