@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase"
 import MultiUpload from "@/app/components/MultiUpload"
 import WebRecorder from "@/app/components/WebRecorder"
 import ForkModal from "@/app/components/ForkModal"
-import VisualSequencer from "@/app/components/VisualSequencer"
+import SimpleSequencerView from "@/app/components/SimpleSequencerView"
 
 interface Track {
   id: string
@@ -898,9 +898,9 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               </div>
             </div>
 
-            {/* ✅ SECUENCIADOR VISUAL */}
+            {/* ✅ SECUENCIADOR VISUAL SIMPLE */}
             <div style={{ marginTop: "16px" }}>
-              <VisualSequencer
+              <SimpleSequencerView
                 tracks={tracks}
                 selectedTracks={selectedTracks}
                 isPlaying={isPlaying}
