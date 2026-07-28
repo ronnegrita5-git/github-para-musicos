@@ -174,9 +174,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current)
-      }
     }
   }, [id])
 
@@ -220,7 +217,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ✅ FUNCIÓN CORREGIDA: Reproduce la pista COMPLETA desde la posición indicada
   const playTrack = async (track: Track, startPosition: number = 0) => {
     const ctx = initAudioContext()
     
@@ -260,13 +256,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         if (audioNodesRef.current.length === 0) {
           setIsPlaying(false)
           isPlayingRef.current = false
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current)
+            animationRef.current = null
+          }
         }
       }
     }
     
-    // ✅ CORREGIDO: start(0, offset) reproduce desde offset hasta el final
-    // Si offset es 0, reproduce todo el audio
-    // Si offset > 0, reproduce desde esa posición
     const offset = Math.min(startPosition, audioBuffer.duration - 0.1)
     source.start(0, offset)
     
@@ -290,7 +287,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
     let maxDuration = 0
     for (const track of selected) {
-      // ✅ Reproducir desde el inicio (offset = 0)
       const duration = await playTrack(track, 0)
       if (duration && duration > maxDuration) {
         maxDuration = duration
@@ -304,6 +300,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current)
+      animationRef.current = null
     }
     
     const updateProgress = () => {
@@ -327,17 +324,24 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     animationRef.current = requestAnimationFrame(updateProgress)
   }
 
+  // ✅ CORREGIDO: Detener todo correctamente
   const stopAllAudio = () => {
-    audioNodesRef.current.forEach(({ source }) => {
-      try { source.stop() } catch (e) {}
-    })
-    audioNodesRef.current = []
-    setIsPlaying(false)
-    isPlayingRef.current = false
+    // ✅ Detener el bucle de progreso primero
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current)
       animationRef.current = null
     }
+    
+    // ✅ Detener todas las fuentes de audio
+    audioNodesRef.current.forEach(({ source }) => {
+      try { source.stop() } catch (e) {}
+    })
+    audioNodesRef.current = []
+    
+    // ✅ Actualizar estados
+    setIsPlaying(false)
+    isPlayingRef.current = false
+    setCurrentTime(0)
   }
 
   const seekTo = (position: number) => {
@@ -346,12 +350,10 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     
     if (isPlayingRef.current) {
       const wasPlaying = isPlayingRef.current
-      // Detener todo
       stopAllAudio()
       
       setTimeout(async () => {
         if (wasPlaying) {
-          // ✅ Reproducir desde la nueva posición
           const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
           let maxDuration = 0
           for (const track of selected) {
@@ -367,6 +369,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           
           if (animationRef.current) {
             cancelAnimationFrame(animationRef.current)
+            animationRef.current = null
           }
           const updateProgress = () => {
             if (!isPlayingRef.current) return
