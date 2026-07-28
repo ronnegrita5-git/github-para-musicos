@@ -39,14 +39,10 @@ export default function NativeSequencer({
 }: NativeSequencerProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
-  const [waveforms, setWaveforms] = useState<Record<string, number[]>>({});
-  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
-  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const animationRef = useRef<number | null>(null);
-  const startTimeRef = useRef<number>(0);
-  const [isDragging, setIsDragging] = useState(false);
 
-  // ✅ Calcular duración total (la más larga de las seleccionadas)
+  // ✅ Calcular duración total
   useEffect(() => {
     const selected = tracks.filter(t => selectedTracks.has(t.id));
     let maxDuration = 0;
@@ -58,102 +54,49 @@ export default function NativeSequencer({
     setTotalDuration(maxDuration || 1);
   }, [tracks, selectedTracks]);
 
-  // ✅ Generar formas de onda
-  useEffect(() => {
-    const generateWaveform = async (track: Track) => {
-      try {
-        const response = await fetch(track.audio_url);
-        const arrayBuffer = await response.arrayBuffer();
-        const audioContext = new AudioContext();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        const channelData = audioBuffer.getChannelData(0);
-        const samples = 150;
-        const blockSize = Math.floor(channelData.length / samples);
-        const waveform: number[] = [];
-        
-        for (let i = 0; i < samples; i++) {
-          const start = i * blockSize;
-          let sum = 0;
-          for (let j = 0; j < blockSize; j++) {
-            sum += Math.abs(channelData[start + j] || 0);
-          }
-          waveform.push(sum / blockSize);
-        }
-        
-        setWaveforms(prev => ({
-          ...prev,
-          [track.id]: waveform
-        }));
-        
-        if (!track.duration) {
-          await fetch(`/api/tracks/${track.id}/duration`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ duration: audioBuffer.duration })
-          });
-        }
-      } catch (error) {
-        console.error('Error generando waveform:', error);
-      }
-    };
-
-    const selected = tracks.filter(t => selectedTracks.has(t.id));
-    selected.forEach(track => {
-      if (!waveforms[track.id]) {
-        generateWaveform(track);
-      }
-    });
-  }, [tracks, selectedTracks]);
-
-  // ✅ Dibujar formas de onda
-  useEffect(() => {
-    Object.keys(canvasRefs.current).forEach(trackId => {
-      const canvas = canvasRefs.current[trackId];
-      const waveform = waveforms[trackId];
-      if (canvas && waveform && waveform.length > 0) {
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        
-        const width = canvas.width;
-        const height = canvas.height;
-        
-        ctx.clearRect(0, 0, width, height);
-        ctx.fillStyle = 'rgba(255,255,255,0.05)';
-        ctx.fillRect(0, 0, width, height);
-        
-        const barWidth = width / waveform.length;
-        const mid = height / 2;
-        const progress = totalDuration > 0 ? currentTime / totalDuration : 0;
-        
-        waveform.forEach((value, index) => {
-          const x = index * barWidth;
-          const barHeight = Math.max(1, value * height * 0.8);
-          const y = mid - barHeight / 2;
-          const isPlayed = x / width < progress;
-          ctx.fillStyle = isPlayed ? '#10b981' : '#4a5568';
-          ctx.fillRect(x, y, barWidth - 1, barHeight);
-        });
-      }
-    });
-  }, [waveforms, currentTime, totalDuration]);
-
-  // ✅ Actualizar progreso (solo visual)
+  // ✅ Controlar reproducción
   useEffect(() => {
     if (isPlaying) {
-      startTimeRef.current = Date.now() - currentTime * 1000;
+      // Simular progreso
+      const startTime = Date.now() - currentTime * 1000;
       
       const updateProgress = () => {
-        const elapsed = (Date.now() - startTimeRef.current) / 1000;
+        const elapsed = (Date.now() - startTime) / 1000;
         const newTime = Math.min(elapsed, totalDuration);
         setCurrentTime(newTime);
         
         if (newTime < totalDuration) {
           animationRef.current = requestAnimationFrame(updateProgress);
-        } else if (loopEnabled) {
-          setCurrentTime(0);
-          startTimeRef.current = Date.now();
-          animationRef.current = requestAnimationFrame(updateProgress);
+        } else {
+          if (loopEnabled) {
+            setCurrentTime(0);
+            // Reiniciar el bucle
+            const newStart = Date.now();
+            const loopUpdate = () => {
+              const loopElapsed = (Date.now() - newStart) / 1000;
+              const loopTime = Math.min(loopElapsed, totalDuration);
+              setCurrentTime(loopTime);
+              if (loopTime < totalDuration) {
+                animationRef.current = requestAnimationFrame(loopUpdate);
+              } else {
+                // Repetir loop
+                setCurrentTime(0);
+                const restart = Date.now();
+                const restartLoop = () => {
+                  const restartElapsed = (Date.now() - restart) / 1000;
+                  const restartTime = Math.min(restartElapsed, totalDuration);
+                  setCurrentTime(restartTime);
+                  if (restartTime < totalDuration) {
+                    animationRef.current = requestAnimationFrame(restartLoop);
+                  }
+                };
+                animationRef.current = requestAnimationFrame(restartLoop);
+              }
+            };
+            animationRef.current = requestAnimationFrame(loopUpdate);
+          } else {
+            onStop();
+          }
         }
       };
       
@@ -181,16 +124,6 @@ export default function NativeSequencer({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // ✅ Manejar timeline
-  const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!timelineRef.current) return;
-    const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = Math.max(0, Math.min(1, x / rect.width));
-    const newTime = percentage * totalDuration;
-    setCurrentTime(newTime);
-  };
-
   const progressPercentage = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
   const visibleTracks = tracks.filter(t => selectedTracks.has(t.id));
 
@@ -216,13 +149,16 @@ export default function NativeSequencer({
       borderRadius: 8,
       border: '1px solid rgba(255,255,255,0.05)'
     }}>
-      {/* Controles superiores */}
+      {/* ✅ CONTROLES SUPERIORES - TODOS VISIBLES */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '12px',
+        gap: '8px',
         flexWrap: 'wrap',
-        marginBottom: '12px'
+        marginBottom: '12px',
+        padding: '8px',
+        background: 'rgba(255,255,255,0.02)',
+        borderRadius: 6
       }}>
         <span style={{ fontSize: 14, fontWeight: 'bold', color: '#10b981' }}>
           🎛️ Secuenciador
@@ -233,8 +169,9 @@ export default function NativeSequencer({
         
         <div style={{ flex: 1 }} />
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: 12, color: '#6b7280' }}>🎚️</span>
+        {/* Volumen Master */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>🔊</span>
           <input
             type="range"
             min="0"
@@ -242,32 +179,34 @@ export default function NativeSequencer({
             step="0.01"
             value={masterVolume}
             onChange={(e) => onMasterVolumeChange(parseFloat(e.target.value))}
-            style={{ width: 100, accentColor: '#10b981' }}
+            style={{ width: 80, accentColor: '#10b981' }}
           />
-          <span style={{ fontSize: 12, color: '#6b7280', minWidth: 35 }}>
+          <span style={{ fontSize: 11, color: '#6b7280', minWidth: 30 }}>
             {Math.round(masterVolume * 100)}%
           </span>
         </div>
         
+        {/* Loop */}
         <button
           onClick={onLoopToggle}
           style={{
-            padding: '4px 12px',
-            background: loopEnabled ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.05)',
-            color: loopEnabled ? '#10b981' : '#6b7280',
+            padding: '4px 10px',
+            background: loopEnabled ? '#10b981' : 'rgba(255,255,255,0.05)',
+            color: loopEnabled ? 'white' : '#6b7280',
             border: loopEnabled ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
             borderRadius: 4,
             cursor: 'pointer',
             fontSize: 12
           }}
         >
-          {loopEnabled ? '🔁 Loop ON' : '➡️ Loop OFF'}
+          {loopEnabled ? '🔁 Loop' : '➡️ Loop'}
         </button>
         
+        {/* Stop */}
         <button
           onClick={onStop}
           style={{
-            padding: '6px 16px',
+            padding: '6px 14px',
             background: '#ef4444',
             color: 'white',
             border: 'none',
@@ -280,10 +219,11 @@ export default function NativeSequencer({
           ⏹
         </button>
         
+        {/* Play/Pause */}
         <button
           onClick={onPlay}
           style={{
-            padding: '6px 16px',
+            padding: '6px 14px',
             background: isPlaying ? '#fbbf24' : '#10b981',
             color: 'white',
             border: 'none',
@@ -293,18 +233,21 @@ export default function NativeSequencer({
             fontWeight: 'bold'
           }}
         >
-          {isPlaying ? '⏸ Pausa' : '▶️ Reproducir'}
+          {isPlaying ? '⏸' : '▶️'}
         </button>
       </div>
 
-      {/* ✅ Botones de navegación - VISIBLES */}
+      {/* ✅ BOTONES DE NAVEGACIÓN */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         gap: '6px',
         marginBottom: '8px',
         justifyContent: 'center',
-        flexWrap: 'wrap'
+        flexWrap: 'wrap',
+        padding: '4px',
+        background: 'rgba(255,255,255,0.02)',
+        borderRadius: 6
       }}>
         <button
           onClick={() => setCurrentTime(0)}
@@ -315,17 +258,14 @@ export default function NativeSequencer({
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 4,
             cursor: 'pointer',
-            fontSize: 13
+            fontSize: 14
           }}
-          title="Ir al inicio"
+          title="Inicio"
         >
           ⏮️
         </button>
         <button
-          onClick={() => {
-            const newTime = Math.max(0, currentTime - 5);
-            setCurrentTime(newTime);
-          }}
+          onClick={() => setCurrentTime(Math.max(0, currentTime - 5))}
           style={{
             padding: '4px 10px',
             background: 'rgba(255,255,255,0.05)',
@@ -333,17 +273,14 @@ export default function NativeSequencer({
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 4,
             cursor: 'pointer',
-            fontSize: 13
+            fontSize: 14
           }}
-          title="Retroceder 5 segundos"
+          title="-5s"
         >
           ⏪
         </button>
         <button
-          onClick={() => {
-            const newTime = Math.min(totalDuration, currentTime + 5);
-            setCurrentTime(newTime);
-          }}
+          onClick={() => setCurrentTime(Math.min(totalDuration, currentTime + 5))}
           style={{
             padding: '4px 10px',
             background: 'rgba(255,255,255,0.05)',
@@ -351,9 +288,9 @@ export default function NativeSequencer({
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 4,
             cursor: 'pointer',
-            fontSize: 13
+            fontSize: 14
           }}
-          title="Adelantar 5 segundos"
+          title="+5s"
         >
           ⏩
         </button>
@@ -366,32 +303,36 @@ export default function NativeSequencer({
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 4,
             cursor: 'pointer',
-            fontSize: 13
+            fontSize: 14
           }}
-          title="Ir al final"
+          title="Fin"
         >
           ⏭️
         </button>
       </div>
 
-      {/* Línea de tiempo interactiva */}
+      {/* ✅ LÍNEA DE TIEMPO */}
       <div style={{ marginBottom: '12px' }}>
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           fontSize: 12,
           color: '#6b7280',
-          marginBottom: '4px'
+          marginBottom: '2px'
         }}>
-          <span>⏱️ {formatTime(currentTime)}</span>
-          <span>⏱️ {formatTime(totalDuration)}</span>
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(totalDuration)}</span>
         </div>
         <div
-          ref={timelineRef}
-          onClick={handleTimelineClick}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percentage = Math.max(0, Math.min(1, x / rect.width));
+            setCurrentTime(percentage * totalDuration);
+          }}
           style={{
             width: '100%',
-            height: '20px',
+            height: '16px',
             background: 'rgba(255,255,255,0.05)',
             borderRadius: 4,
             overflow: 'hidden',
@@ -403,29 +344,27 @@ export default function NativeSequencer({
             width: `${progressPercentage}%`,
             height: '100%',
             background: 'rgba(16,185,129,0.3)',
-            borderRadius: 4,
-            transition: 'width 0.1s linear'
+            borderRadius: 4
           }} />
           <div style={{
             position: 'absolute',
             left: `${progressPercentage}%`,
             top: 0,
-            width: '4px',
+            width: '3px',
             height: '100%',
             background: '#10b981',
             borderRadius: 2,
-            transform: 'translateX(-2px)',
-            transition: 'left 0.1s linear'
+            transform: 'translateX(-1.5px)'
           }} />
         </div>
       </div>
 
-      {/* Lista de pistas */}
+      {/* ✅ LISTA DE PISTAS */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px',
-        maxHeight: '400px',
+        gap: '6px',
+        maxHeight: '300px',
         overflowY: 'auto'
       }}>
         {visibleTracks.map((track) => {
@@ -433,68 +372,54 @@ export default function NativeSequencer({
           return (
             <div key={track.id} style={{
               display: 'flex',
-              flexDirection: 'column',
-              gap: '4px',
-              padding: '8px 12px',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '6px 10px',
               background: 'rgba(255,255,255,0.03)',
               borderRadius: 4,
               border: '1px solid rgba(255,255,255,0.05)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: 16, minWidth: 30 }}>🎵</span>
+              <span style={{ fontSize: 14 }}>🎵</span>
+              <span style={{
+                fontSize: 12,
+                color: 'white',
+                fontWeight: 'bold',
+                minWidth: 80,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {track.name}
+              </span>
+              {track.instrument && (
                 <span style={{
-                  fontSize: 13,
-                  color: 'white',
-                  fontWeight: 'bold',
-                  minWidth: 100,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
+                  fontSize: 10,
+                  color: '#10b981',
+                  background: 'rgba(16,185,129,0.1)',
+                  padding: '2px 8px',
+                  borderRadius: 10
                 }}>
-                  {track.name}
+                  {track.instrument}
                 </span>
-                {track.instrument && (
-                  <span style={{
-                    fontSize: 11,
-                    color: '#10b981',
-                    background: 'rgba(16,185,129,0.1)',
-                    padding: '2px 8px',
-                    borderRadius: 12
-                  }}>
-                    {track.instrument}
-                  </span>
-                )}
-                <div style={{ flex: 1 }} />
-                {track.duration && (
-                  <span style={{ fontSize: 11, color: '#6b7280', minWidth: 50 }}>
-                    {formatTime(track.duration)}
-                  </span>
-                )}
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={volume}
-                  onChange={(e) => onTrackVolumeChange(track.id, parseFloat(e.target.value))}
-                  style={{ width: 60, accentColor: '#10b981' }}
-                />
-                <span style={{ fontSize: 11, color: '#6b7280', minWidth: 35 }}>
-                  {Math.round(volume * 100)}%
+              )}
+              <div style={{ flex: 1 }} />
+              {track.duration && (
+                <span style={{ fontSize: 10, color: '#6b7280', minWidth: 40 }}>
+                  {formatTime(track.duration)}
                 </span>
-              </div>
-              <canvas
-                ref={(el) => { canvasRefs.current[track.id] = el; }}
-                width={800}
-                height={40}
-                style={{
-                  width: '100%',
-                  height: '40px',
-                  background: 'rgba(0,0,0,0.2)',
-                  borderRadius: 4,
-                  display: 'block'
-                }}
+              )}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={volume}
+                onChange={(e) => onTrackVolumeChange(track.id, parseFloat(e.target.value))}
+                style={{ width: 50, accentColor: '#10b981' }}
               />
+              <span style={{ fontSize: 10, color: '#6b7280', minWidth: 30 }}>
+                {Math.round(volume * 100)}%
+              </span>
             </div>
           );
         })}
