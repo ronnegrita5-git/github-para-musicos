@@ -1,0 +1,288 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+
+interface Track {
+  id: string;
+  name: string;
+  audio_url: string;
+  instrument?: string;
+  duration?: number;
+}
+
+interface VisualSequencerProps {
+  tracks: Track[];
+  selectedTracks: Set<string>;
+  isPlaying: boolean;
+  currentTime: number;
+  totalDuration: number;
+  onSeek?: (time: number) => void;
+}
+
+export default function VisualSequencer({
+  tracks,
+  selectedTracks,
+  isPlaying,
+  currentTime,
+  totalDuration,
+  onSeek
+}: VisualSequencerProps) {
+  const [waveforms, setWaveforms] = useState<Record<string, number[]>>({});
+  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // ✅ Generar formas de onda
+  useEffect(() => {
+    const generateWaveform = async (track: Track) => {
+      try {
+        const response = await fetch(track.audio_url);
+        const arrayBuffer = await response.arrayBuffer();
+        const audioContext = new AudioContext();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        const channelData = audioBuffer.getChannelData(0);
+        const samples = 200;
+        const blockSize = Math.floor(channelData.length / samples);
+        const waveform: number[] = [];
+        
+        for (let i = 0; i < samples; i++) {
+          const start = i * blockSize;
+          let sum = 0;
+          for (let j = 0; j < blockSize; j++) {
+            sum += Math.abs(channelData[start + j] || 0);
+          }
+          waveform.push(sum / blockSize);
+        }
+        
+        setWaveforms(prev => ({
+          ...prev,
+          [track.id]: waveform
+        }));
+      } catch (error) {
+        console.error('Error generando waveform:', error);
+      }
+    };
+
+    const selected = tracks.filter(t => selectedTracks.has(t.id));
+    selected.forEach(track => {
+      if (!waveforms[track.id]) {
+        generateWaveform(track);
+      }
+    });
+  }, [tracks, selectedTracks]);
+
+  // ✅ Dibujar formas de onda en Canvas
+  useEffect(() => {
+    Object.keys(canvasRefs.current).forEach(trackId => {
+      const canvas = canvasRefs.current[trackId];
+      const waveform = waveforms[trackId];
+      if (canvas && waveform && waveform.length > 0) {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        const rect = canvas.parentElement?.getBoundingClientRect();
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = 'rgba(255,255,255,0.03)';
+        ctx.fillRect(0, 0, width, height);
+        
+        const barWidth = width / waveform.length;
+        const mid = height / 2;
+        const progress = totalDuration > 0 ? currentTime / totalDuration : 0;
+        
+        waveform.forEach((value, index) => {
+          const x = index * barWidth;
+          const barHeight = Math.max(1, value * height * 0.8);
+          const y = mid - barHeight / 2;
+          const isPlayed = x / width < progress;
+          
+          ctx.fillStyle = isPlayed ? '#10b981' : '#4a5568';
+          ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
+        });
+      }
+    });
+  }, [waveforms, currentTime, totalDuration]);
+
+  // ✅ Formatear tiempo
+  const formatTime = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const visibleTracks = tracks.filter(t => selectedTracks.has(t.id));
+
+  if (visibleTracks.length === 0) {
+    return (
+      <div style={{
+        padding: '20px',
+        background: 'rgba(255,255,255,0.03)',
+        borderRadius: 8,
+        border: '1px solid rgba(255,255,255,0.05)',
+        textAlign: 'center',
+        color: '#6b7280'
+      }}>
+        <p>🎵 Selecciona pistas para ver el secuenciador</p>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={containerRef} style={{
+      padding: '12px',
+      background: 'rgba(255,255,255,0.02)',
+      borderRadius: 8,
+      border: '1px solid rgba(255,255,255,0.05)'
+    }}>
+      {/* Encabezado del secuenciador */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '8px',
+        padding: '0 4px'
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 'bold', color: '#10b981' }}>
+          🎛️ Secuenciador
+        </span>
+        <span style={{ fontSize: 12, color: '#6b7280' }}>
+          {visibleTracks.length} pistas · {formatTime(totalDuration)}
+        </span>
+      </div>
+
+      {/* Línea de tiempo */}
+      <div style={{ marginBottom: '8px' }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 11,
+          color: '#6b7280',
+          marginBottom: '2px'
+        }}>
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(totalDuration)}</span>
+        </div>
+        <div
+          onClick={(e) => {
+            if (!onSeek) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percentage = Math.max(0, Math.min(1, x / rect.width));
+            onSeek(percentage * totalDuration);
+          }}
+          style={{
+            width: '100%',
+            height: '14px',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: 3,
+            overflow: 'hidden',
+            position: 'relative',
+            cursor: onSeek ? 'pointer' : 'default'
+          }}
+        >
+          <div style={{
+            width: `${(currentTime / totalDuration) * 100}%`,
+            height: '100%',
+            background: 'rgba(16,185,129,0.3)',
+            borderRadius: 3
+          }} />
+          <div style={{
+            position: 'absolute',
+            left: `${(currentTime / totalDuration) * 100}%`,
+            top: 0,
+            width: '3px',
+            height: '100%',
+            background: '#10b981',
+            borderRadius: 2,
+            transform: 'translateX(-1.5px)'
+          }} />
+        </div>
+      </div>
+
+      {/* Lista de pistas con forma de onda */}
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
+        maxHeight: '300px',
+        overflowY: 'auto'
+      }}>
+        {visibleTracks.map((track) => {
+          const isTrackPlaying = isPlaying && selectedTracks.has(track.id);
+          
+          return (
+            <div key={track.id} style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '2px',
+              padding: '6px 8px',
+              background: isTrackPlaying ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.02)',
+              borderRadius: 4,
+              border: isTrackPlaying ? '1px solid rgba(16,185,129,0.15)' : '1px solid rgba(255,255,255,0.05)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: 14 }}>🎵</span>
+                <span style={{
+                  fontSize: 12,
+                  color: 'white',
+                  fontWeight: isTrackPlaying ? 'bold' : 'normal',
+                  minWidth: 80,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {track.name}
+                </span>
+                {track.instrument && (
+                  <span style={{
+                    fontSize: 10,
+                    color: '#10b981',
+                    background: 'rgba(16,185,129,0.1)',
+                    padding: '2px 8px',
+                    borderRadius: 10
+                  }}>
+                    {track.instrument}
+                  </span>
+                )}
+                {isTrackPlaying && (
+                  <span style={{
+                    fontSize: 10,
+                    color: '#10b981',
+                    marginLeft: 'auto'
+                  }}>
+                    🔊
+                  </span>
+                )}
+                {track.duration && (
+                  <span style={{
+                    fontSize: 10,
+                    color: '#6b7280',
+                    minWidth: 40,
+                    textAlign: 'right'
+                  }}>
+                    {formatTime(track.duration)}
+                  </span>
+                )}
+              </div>
+              <canvas
+                ref={(el) => { canvasRefs.current[track.id] = el; }}
+                width={800}
+                height={30}
+                style={{
+                  width: '100%',
+                  height: '30px',
+                  background: 'rgba(0,0,0,0.15)',
+                  borderRadius: 3,
+                  display: 'block'
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

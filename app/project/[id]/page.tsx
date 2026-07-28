@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase"
 import MultiUpload from "@/app/components/MultiUpload"
 import WebRecorder from "@/app/components/WebRecorder"
 import ForkModal from "@/app/components/ForkModal"
+import VisualSequencer from "@/app/components/VisualSequencer"
 
 interface Track {
   id: string
@@ -324,21 +325,17 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     animationRef.current = requestAnimationFrame(updateProgress)
   }
 
-  // ✅ CORREGIDO: Detener todo correctamente
   const stopAllAudio = () => {
-    // ✅ Detener el bucle de progreso primero
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current)
       animationRef.current = null
     }
     
-    // ✅ Detener todas las fuentes de audio
     audioNodesRef.current.forEach(({ source }) => {
       try { source.stop() } catch (e) {}
     })
     audioNodesRef.current = []
     
-    // ✅ Actualizar estados
     setIsPlaying(false)
     isPlayingRef.current = false
     setCurrentTime(0)
@@ -701,204 +698,218 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
         {/* ============ CONTROLES DE REPRODUCCIÓN ============ */}
         {selectedCount > 0 && (
-          <div style={{ 
-            marginTop: 20,
-            padding: "16px",
-            background: "rgba(255,255,255,0.05)",
-            borderRadius: 8,
-            border: "1px solid rgba(255,255,255,0.1)"
-          }}>
-            {/* Barra de progreso */}
-            <div style={{ marginBottom: "12px" }}>
+          <>
+            <div style={{ 
+              marginTop: 20,
+              padding: "16px",
+              background: "rgba(255,255,255,0.05)",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.1)"
+            }}>
+              {/* Barra de progreso */}
+              <div style={{ marginBottom: "12px" }}>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: 12,
+                  color: '#6b7280',
+                  marginBottom: '4px'
+                }}>
+                  <span>⏱️ {formatTime(currentTime)}</span>
+                  <span>⏱️ {formatTime(totalDuration)}</span>
+                </div>
+                <div
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const percentage = Math.max(0, Math.min(1, x / rect.width));
+                    seekTo(percentage * totalDuration);
+                  }}
+                  style={{
+                    width: '100%',
+                    height: '16px',
+                    background: 'rgba(255,255,255,0.05)',
+                    borderRadius: 4,
+                    overflow: 'hidden',
+                    position: 'relative',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{
+                    width: `${progressPercentage}%`,
+                    height: '100%',
+                    background: 'rgba(16,185,129,0.3)',
+                    borderRadius: 4
+                  }} />
+                  <div style={{
+                    position: 'absolute',
+                    left: `${progressPercentage}%`,
+                    top: 0,
+                    width: '3px',
+                    height: '100%',
+                    background: '#10b981',
+                    borderRadius: 2,
+                    transform: 'translateX(-1.5px)'
+                  }} />
+                </div>
+              </div>
+
+              {/* Botones de navegación */}
               <div style={{
                 display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: 12,
-                color: '#6b7280',
-                marginBottom: '4px'
+                alignItems: 'center',
+                gap: '6px',
+                marginBottom: '12px',
+                justifyContent: 'center',
+                flexWrap: 'wrap'
               }}>
-                <span>⏱️ {formatTime(currentTime)}</span>
-                <span>⏱️ {formatTime(totalDuration)}</span>
+                <button
+                  onClick={() => seekTo(0)}
+                  style={{
+                    padding: '4px 10px',
+                    background: 'rgba(255,255,255,0.05)',
+                    color: '#6b7280',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 14
+                  }}
+                  title="Inicio"
+                >
+                  ⏮️
+                </button>
+                <button
+                  onClick={() => seekTo(Math.max(0, currentTime - 5))}
+                  style={{
+                    padding: '4px 10px',
+                    background: 'rgba(255,255,255,0.05)',
+                    color: '#6b7280',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 14
+                  }}
+                  title="-5s"
+                >
+                  ⏪
+                </button>
+                <button
+                  onClick={() => seekTo(Math.min(totalDuration, currentTime + 5))}
+                  style={{
+                    padding: '4px 10px',
+                    background: 'rgba(255,255,255,0.05)',
+                    color: '#6b7280',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 14
+                  }}
+                  title="+5s"
+                >
+                  ⏩
+                </button>
+                <button
+                  onClick={() => seekTo(totalDuration)}
+                  style={{
+                    padding: '4px 10px',
+                    background: 'rgba(255,255,255,0.05)',
+                    color: '#6b7280',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 14
+                  }}
+                  title="Fin"
+                >
+                  ⏭️
+                </button>
               </div>
-              <div
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const x = e.clientX - rect.left;
-                  const percentage = Math.max(0, Math.min(1, x / rect.width));
-                  seekTo(percentage * totalDuration);
-                }}
-                style={{
-                  width: '100%',
-                  height: '16px',
-                  background: 'rgba(255,255,255,0.05)',
-                  borderRadius: 4,
-                  overflow: 'hidden',
-                  position: 'relative',
-                  cursor: 'pointer'
-                }}
-              >
-                <div style={{
-                  width: `${progressPercentage}%`,
-                  height: '100%',
-                  background: 'rgba(16,185,129,0.3)',
-                  borderRadius: 4
-                }} />
-                <div style={{
-                  position: 'absolute',
-                  left: `${progressPercentage}%`,
-                  top: 0,
-                  width: '3px',
-                  height: '100%',
-                  background: '#10b981',
-                  borderRadius: 2,
-                  transform: 'translateX(-1.5px)'
-                }} />
+
+              {/* Controles de volumen y loop */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                flexWrap: 'wrap',
+                justifyContent: 'center'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>🔊</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={masterVolume}
+                    onChange={(e) => updateMasterVolume(parseFloat(e.target.value))}
+                    style={{ width: 80, accentColor: '#10b981' }}
+                  />
+                  <span style={{ fontSize: 11, color: '#6b7280', minWidth: 30 }}>
+                    {Math.round(masterVolume * 100)}%
+                  </span>
+                </div>
+                
+                <button
+                  onClick={() => setLoopEnabled(!loopEnabled)}
+                  style={{
+                    padding: '4px 12px',
+                    background: loopEnabled ? '#10b981' : 'rgba(255,255,255,0.05)',
+                    color: loopEnabled ? 'white' : '#6b7280',
+                    border: loopEnabled ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 12
+                  }}
+                >
+                  {loopEnabled ? '🔁 Loop ON' : '➡️ Loop OFF'}
+                </button>
+                
+                <button
+                  onClick={stopAllAudio}
+                  style={{
+                    padding: '6px 16px',
+                    background: '#ef4444',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 'bold'
+                  }}
+                >
+                  ⏹ Detener
+                </button>
+                
+                <button
+                  onClick={playAllSelectedTracks}
+                  style={{
+                    padding: '6px 16px',
+                    background: isPlaying ? '#fbbf24' : '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    fontWeight: 'bold'
+                  }}
+                >
+                  {isPlaying ? '🔊 Reproduciendo' : '▶️ Reproducir'}
+                </button>
               </div>
             </div>
 
-            {/* Botones de navegación */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              marginBottom: '12px',
-              justifyContent: 'center',
-              flexWrap: 'wrap'
-            }}>
-              <button
-                onClick={() => seekTo(0)}
-                style={{
-                  padding: '4px 10px',
-                  background: 'rgba(255,255,255,0.05)',
-                  color: '#6b7280',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 14
-                }}
-                title="Inicio"
-              >
-                ⏮️
-              </button>
-              <button
-                onClick={() => seekTo(Math.max(0, currentTime - 5))}
-                style={{
-                  padding: '4px 10px',
-                  background: 'rgba(255,255,255,0.05)',
-                  color: '#6b7280',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 14
-                }}
-                title="-5s"
-              >
-                ⏪
-              </button>
-              <button
-                onClick={() => seekTo(Math.min(totalDuration, currentTime + 5))}
-                style={{
-                  padding: '4px 10px',
-                  background: 'rgba(255,255,255,0.05)',
-                  color: '#6b7280',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 14
-                }}
-                title="+5s"
-              >
-                ⏩
-              </button>
-              <button
-                onClick={() => seekTo(totalDuration)}
-                style={{
-                  padding: '4px 10px',
-                  background: 'rgba(255,255,255,0.05)',
-                  color: '#6b7280',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 14
-                }}
-                title="Fin"
-              >
-                ⏭️
-              </button>
+            {/* ✅ SECUENCIADOR VISUAL */}
+            <div style={{ marginTop: "16px" }}>
+              <VisualSequencer
+                tracks={tracks}
+                selectedTracks={selectedTracks}
+                isPlaying={isPlaying}
+                currentTime={currentTime}
+                totalDuration={totalDuration}
+                onSeek={seekTo}
+              />
             </div>
-
-            {/* Controles de volumen y loop */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              flexWrap: 'wrap',
-              justifyContent: 'center'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ fontSize: 12, color: '#6b7280' }}>🔊</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={masterVolume}
-                  onChange={(e) => updateMasterVolume(parseFloat(e.target.value))}
-                  style={{ width: 80, accentColor: '#10b981' }}
-                />
-                <span style={{ fontSize: 11, color: '#6b7280', minWidth: 30 }}>
-                  {Math.round(masterVolume * 100)}%
-                </span>
-              </div>
-              
-              <button
-                onClick={() => setLoopEnabled(!loopEnabled)}
-                style={{
-                  padding: '4px 12px',
-                  background: loopEnabled ? '#10b981' : 'rgba(255,255,255,0.05)',
-                  color: loopEnabled ? 'white' : '#6b7280',
-                  border: loopEnabled ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 12
-                }}
-              >
-                {loopEnabled ? '🔁 Loop ON' : '➡️ Loop OFF'}
-              </button>
-              
-              <button
-                onClick={stopAllAudio}
-                style={{
-                  padding: '6px 16px',
-                  background: '#ef4444',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 'bold'
-                }}
-              >
-                ⏹ Detener
-              </button>
-              
-              <button
-                onClick={playAllSelectedTracks}
-                style={{
-                  padding: '6px 16px',
-                  background: isPlaying ? '#fbbf24' : '#10b981',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  fontWeight: 'bold'
-                }}
-              >
-                {isPlaying ? '🔊 Reproduciendo' : '▶️ Reproducir'}
-              </button>
-            </div>
-          </div>
+          </>
         )}
 
         {/* ============ SECCIÓN DE PISTAS ============ */}
