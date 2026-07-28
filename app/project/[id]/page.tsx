@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase"
 import MultiUpload from "@/app/components/MultiUpload"
 import WebRecorder from "@/app/components/WebRecorder"
 import ForkModal from "@/app/components/ForkModal"
+import SimpleSequencer from "@/app/components/SimpleSequencer"
 
 interface Track {
   id: string
@@ -110,6 +111,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       })
       setTrackVolumes(volumes)
       setTrackRealVolumes(realVolumes)
+      
     } catch (error) {
       console.error("Error cargando pistas:", error)
     } finally {
@@ -175,7 +177,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
-  // ✅ Cargar audio en caché
   const loadAudioBuffer = async (trackId: string, audioUrl: string): Promise<AudioBuffer | null> => {
     if (audioCacheRef.current[trackId]) {
       return audioCacheRef.current[trackId]
@@ -190,6 +191,15 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
       
       audioCacheRef.current[trackId] = audioBuffer
+      
+      // Actualizar duración en la base de datos (si no existe)
+      if (!track.duration) {
+        await supabase
+          .from('tracks')
+          .update({ duration: audioBuffer.duration })
+          .eq('id', trackId)
+      }
+      
       return audioBuffer
     } catch (err) {
       console.error('Error cargando audio:', err)
@@ -197,7 +207,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ✅ Reproducir UNA pista
   const playTrack = async (track: Track) => {
     const ctx = initAudioContext()
     
@@ -215,7 +224,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     source.loop = loopEnabled
     
     const gainNode = ctx.createGain()
-    // ✅ Usar el volumen actual (puede ser 0 si está deseleccionada)
     const volume = trackVolumes[track.id] || 0
     gainNode.gain.value = volume
     
@@ -229,7 +237,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       buffer: audioBuffer
     })
     
-    // ✅ Cuando termine, eliminarla de la lista
     source.onended = () => {
       const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
       if (index !== -1) {
@@ -244,7 +251,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     setIsPlaying(true)
   }
 
-  // ✅ Reproducir TODAS las seleccionadas
   const playAllSelectedTracks = async () => {
     stopAllAudio()
     
@@ -308,27 +314,23 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  // ✅ Seleccionar/Deseleccionar pista (SOLO volumen, no detiene)
   const toggleTrackSelection = async (trackId: string) => {
     const newSelected = new Set(selectedTracks)
     const isSelected = newSelected.has(trackId)
     const track = tracks.find(t => t.id === trackId)
     
     if (isSelected) {
-      // ✅ Deseleccionar → volumen a 0
       newSelected.delete(trackId)
       setTrackVolumes(prev => ({
         ...prev,
         [trackId]: 0
       }))
       
-      // ✅ Aplicar en tiempo real si está sonando
       const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
       if (audioNode) {
         audioNode.node.gain.value = 0
       }
     } else {
-      // ✅ Seleccionar → restaurar volumen real
       newSelected.add(trackId)
       const realVolume = trackRealVolumes[trackId] || 0.8
       setTrackVolumes(prev => ({
@@ -336,18 +338,14 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
         [trackId]: realVolume
       }))
       
-      // ✅ Si ya hay reproducción, añadir esta pista (si no está sonando)
       if (audioNodesRef.current.length > 0 && track && track.audio_url) {
-        // Verificar si ya existe un nodo para esta pista
         const existingNode = audioNodesRef.current.find(n => n.trackId === trackId)
         if (!existingNode) {
           await playTrack(track)
         } else {
-          // Si existe, solo restaurar el volumen
           existingNode.node.gain.value = realVolume
         }
       } else if (track && track.audio_url) {
-        // Si no hay reproducción, empezar con esta pista
         await playTrack(track)
       }
     }
@@ -359,14 +357,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     const allIds = new Set(tracks.map(t => t.id))
     setSelectedTracks(allIds)
     
-    // Restaurar volúmenes reales
     const newVolumes: Record<string, number> = {}
     tracks.forEach(track => {
       newVolumes[track.id] = trackRealVolumes[track.id] || 0.8
     })
     setTrackVolumes(newVolumes)
     
-    // Si ya hay reproducción, añadir las que faltan
     if (audioNodesRef.current.length > 0) {
       const currentlyPlaying = new Set(audioNodesRef.current.map(n => n.trackId))
       const missing = [...allIds].filter(id => !currentlyPlaying.has(id))
@@ -381,14 +377,12 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   const deselectAllTracks = () => {
     setSelectedTracks(new Set())
-    // ✅ Poner todas a volumen 0
     const newVolumes: Record<string, number> = {}
     tracks.forEach(track => {
       newVolumes[track.id] = 0
     })
     setTrackVolumes(newVolumes)
-    // ✅ Aplicar en tiempo real
-    audioNodesRef.current.forEach(({ node, trackId }) => {
+    audioNodesRef.current.forEach(({ node }) => {
       node.gain.value = 0
     })
   }
@@ -885,98 +879,22 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
                 })}
               </div>
 
+              {/* ============ SECUENCIADOR ============ */}
               {selectedCount > 0 && (
-                <div style={{ 
-                  marginTop: 20,
-                  padding: "16px",
-                  background: "rgba(255,255,255,0.05)",
-                  borderRadius: 8,
-                  border: "1px solid rgba(255,255,255,0.1)"
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-                    <button
-                      onClick={playAllSelectedTracks}
-                      disabled={isLoadingAudio || selectedCount === 0}
-                      style={{
-                        padding: "8px 20px",
-                        background: isPlaying ? "#fbbf24" : "#10b981",
-                        color: "white",
-                        border: "none",
-                        borderRadius: 6,
-                        cursor: (isLoadingAudio || selectedCount === 0) ? "default" : "pointer",
-                        opacity: (isLoadingAudio || selectedCount === 0) ? 0.5 : 1,
-                        fontWeight: "bold",
-                        fontSize: 14
-                      }}
-                    >
-                      {isLoadingAudio ? '⏳ Cargando...' : isPlaying ? '🔊 Reproduciendo' : '▶️ Reproducir todas'}
-                    </button>
-                    
-                    {isPlaying && (
-                      <button
-                        onClick={stopAllAudio}
-                        style={{
-                          padding: "8px 16px",
-                          background: "#ef4444",
-                          color: "white",
-                          border: "none",
-                          borderRadius: 6,
-                          cursor: "pointer",
-                          fontSize: 14
-                        }}
-                      >
-                        ⏹ Detener
-                      </button>
-                    )}
-                    
-                    <button
-                      onClick={() => setLoopEnabled(!loopEnabled)}
-                      style={{
-                        padding: "8px 16px",
-                        background: loopEnabled ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
-                        color: loopEnabled ? "#10b981" : "#6b7280",
-                        border: loopEnabled ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        fontSize: 13,
-                        fontWeight: loopEnabled ? "bold" : "normal"
-                      }}
-                    >
-                      {loopEnabled ? "🔁 Loop ON" : "➡️ Loop OFF"}
-                    </button>
-                    
-                    <span style={{ color: "#6b7280", fontSize: 13 }}>
-                      {selectedCount} pistas seleccionadas
-                    </span>
-                  </div>
-                  
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    gap: "12px", 
-                    marginTop: "12px",
-                    paddingTop: "12px",
-                    borderTop: "1px solid rgba(255,255,255,0.05)"
-                  }}>
-                    <span style={{ fontSize: 14, color: "#9ca3af", fontWeight: "bold" }}>🎛️ Master</span>
-                    <span style={{ fontSize: 12, color: "#6b7280", minWidth: "40px" }}>
-                      {Math.round(masterVolume * 100)}%
-                    </span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={masterVolume}
-                      onChange={(e) => updateMasterVolume(parseFloat(e.target.value))}
-                      style={{
-                        flex: 1,
-                        maxWidth: "200px",
-                        accentColor: "#10b981"
-                      }}
-                    />
-                    <span style={{ fontSize: 14, color: "#9ca3af" }}>🔊</span>
-                  </div>
+                <div style={{ marginTop: 20 }}>
+                  <SimpleSequencer
+                    tracks={tracks}
+                    selectedTracks={selectedTracks}
+                    isPlaying={isPlaying}
+                    onPlay={playAllSelectedTracks}
+                    onStop={stopAllAudio}
+                    onLoopToggle={() => setLoopEnabled(!loopEnabled)}
+                    loopEnabled={loopEnabled}
+                    masterVolume={masterVolume}
+                    onMasterVolumeChange={updateMasterVolume}
+                    trackVolumes={trackVolumes}
+                    onTrackVolumeChange={updateTrackVolume}
+                  />
                 </div>
               )}
             </>
