@@ -177,27 +177,28 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     return audioContextRef.current
   }
 
-  const loadAudioBuffer = async (trackId: string, audioUrl: string): Promise<AudioBuffer | null> => {
-    if (audioCacheRef.current[trackId]) {
-      return audioCacheRef.current[trackId]
+  // ✅ CORREGIDO: loadAudioBuffer ahora recibe el objeto track completo
+  const loadAudioBuffer = async (track: Track): Promise<AudioBuffer | null> => {
+    if (audioCacheRef.current[track.id]) {
+      return audioCacheRef.current[track.id]
     }
 
     try {
-      const response = await fetch(audioUrl)
-      if (!response.ok) throw new Error(`Error al cargar ${audioUrl}`)
+      const response = await fetch(track.audio_url)
+      if (!response.ok) throw new Error(`Error al cargar ${track.audio_url}`)
       
       const arrayBuffer = await response.arrayBuffer()
       const ctx = initAudioContext()
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
       
-      audioCacheRef.current[trackId] = audioBuffer
+      audioCacheRef.current[track.id] = audioBuffer
       
       // Actualizar duración en la base de datos (si no existe)
       if (!track.duration) {
         await supabase
           .from('tracks')
           .update({ duration: audioBuffer.duration })
-          .eq('id', trackId)
+          .eq('id', track.id)
       }
       
       return audioBuffer
@@ -216,7 +217,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       masterGainRef.current.connect(ctx.destination)
     }
 
-    const audioBuffer = await loadAudioBuffer(track.id, track.audio_url)
+    const audioBuffer = await loadAudioBuffer(track)
     if (!audioBuffer) return
 
     const source = ctx.createBufferSource()
