@@ -27,146 +27,6 @@ export default function VisualSequencer({
   totalDuration,
   onSeek
 }: VisualSequencerProps) {
-  const [waveforms, setWaveforms] = useState<Record<string, number[]>>({});
-  const canvasRefs = useRef<Record<string, HTMLCanvasElement | null>>({});
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  // ✅ Ref para forzar redibujo cuando cambia la selección
-  const drawTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // ✅ Generar formas de onda
-  useEffect(() => {
-    const generateWaveform = async (track: Track) => {
-      try {
-        const response = await fetch(track.audio_url);
-        const arrayBuffer = await response.arrayBuffer();
-        const audioContext = new AudioContext();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        const channelData = audioBuffer.getChannelData(0);
-        const samples = 200;
-        const blockSize = Math.floor(channelData.length / samples);
-        const waveform: number[] = [];
-        
-        for (let i = 0; i < samples; i++) {
-          const start = i * blockSize;
-          let sum = 0;
-          for (let j = 0; j < blockSize; j++) {
-            sum += Math.abs(channelData[start + j] || 0);
-          }
-          waveform.push(sum / blockSize);
-        }
-        
-        setWaveforms(prev => ({
-          ...prev,
-          [track.id]: waveform
-        }));
-      } catch (error) {
-        console.error('Error generando waveform:', error);
-      }
-    };
-
-    const selected = tracks.filter(t => selectedTracks.has(t.id));
-    selected.forEach(track => {
-      if (!waveforms[track.id]) {
-        generateWaveform(track);
-      }
-    });
-  }, [tracks, selectedTracks]);
-
-  // ✅ Dibujar formas de onda - se ejecuta cada vez que cambia totalDuration o waveforms
-  useEffect(() => {
-    // ✅ Limpiar timeout anterior
-    if (drawTimeoutRef.current) {
-      clearTimeout(drawTimeoutRef.current);
-    }
-    
-    // ✅ Pequeño delay para asegurar que todos los canvases están listos
-    drawTimeoutRef.current = setTimeout(() => {
-      drawWaveforms();
-    }, 50);
-    
-    return () => {
-      if (drawTimeoutRef.current) {
-        clearTimeout(drawTimeoutRef.current);
-      }
-    };
-  }, [waveforms, currentTime, tracks, totalDuration, selectedTracks]);
-
-  // ✅ Función de dibujo separada para poder llamarla cuando sea necesario
-  const drawWaveforms = () => {
-    Object.keys(canvasRefs.current).forEach(trackId => {
-      const canvas = canvasRefs.current[trackId];
-      const waveform = waveforms[trackId];
-      const track = tracks.find(t => t.id === trackId);
-      
-      if (canvas && waveform && waveform.length > 0 && track) {
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        
-        const width = canvas.width;
-        const height = canvas.height;
-        
-        ctx.clearRect(0, 0, width, height);
-        
-        // Fondo
-        ctx.fillStyle = 'rgba(255,255,255,0.02)';
-        ctx.fillRect(0, 0, width, height);
-        
-        const trackDuration = track.duration || 1;
-        const trackProgress = Math.min(currentTime / trackDuration, 1);
-        const isFinished = trackProgress >= 1 && trackDuration > 0;
-        
-        // ✅ ESCALA: proporcional a la duración de la pista RELATIVA a totalDuration
-        const maxDuration = totalDuration || 1;
-        const scaleFactor = Math.min(trackDuration / maxDuration, 1);
-        const scaledWidth = width * scaleFactor;
-        
-        const barWidth = scaledWidth / waveform.length;
-        const mid = height / 2;
-        
-        waveform.forEach((value, index) => {
-          const x = index * barWidth;
-          const barHeight = Math.max(1, value * height * 0.8);
-          const y = mid - barHeight / 2;
-          
-          const isPlayed = x / scaledWidth < trackProgress;
-          
-          if (isFinished) {
-            ctx.fillStyle = '#10b981';
-          } else if (isPlayed) {
-            ctx.fillStyle = '#10b981';
-          } else {
-            ctx.fillStyle = '#4a5568';
-          }
-          ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
-        });
-        
-        // ✅ Área gris para el espacio no ocupado por la pista
-        if (scaleFactor < 1) {
-          ctx.fillStyle = 'rgba(255,255,255,0.03)';
-          ctx.fillRect(scaledWidth, 0, width - scaledWidth, height);
-          
-          // Línea de final de pista
-          ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-          ctx.lineWidth = 1;
-          ctx.setLineDash([4, 4]);
-          ctx.beginPath();
-          ctx.moveTo(scaledWidth, 0);
-          ctx.lineTo(scaledWidth, height);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-        
-        // Mostrar duración al final
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(formatTime(trackDuration), Math.min(scaledWidth - 4, width - 4), height - 2);
-      }
-    });
-  };
-
   // ✅ Formatear tiempo
   const formatTime = (seconds: number) => {
     if (!seconds || isNaN(seconds) || seconds < 0) return '0:00';
@@ -193,7 +53,7 @@ export default function VisualSequencer({
   }
 
   return (
-    <div ref={containerRef} style={{
+    <div style={{
       padding: '12px',
       background: 'rgba(255,255,255,0.02)',
       borderRadius: 8,
@@ -264,7 +124,7 @@ export default function VisualSequencer({
         </div>
       </div>
 
-      {/* Lista de pistas */}
+      {/* ✅ Lista de pistas con barras de progreso SIMPLES */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -273,95 +133,82 @@ export default function VisualSequencer({
         overflowY: 'auto'
       }}>
         {visibleTracks.map((track) => {
+          const trackDuration = track.duration || 1;
+          // ✅ Progreso de esta pista (0 a 1, se queda en 1 cuando termina)
+          const trackProgress = Math.min(currentTime / trackDuration, 1);
+          const isFinished = trackProgress >= 1;
           const isTrackPlaying = isPlaying && selectedTracks.has(track.id);
-          const trackDuration = track.duration || 0;
-          const trackProgress = trackDuration > 0 ? Math.min(currentTime / trackDuration, 1) : 0;
-          const isFinished = trackProgress >= 1 && trackDuration > 0;
           
           return (
             <div key={track.id} style={{
               display: 'flex',
-              flexDirection: 'column',
-              gap: '2px',
+              alignItems: 'center',
+              gap: '8px',
               padding: '6px 8px',
-              background: isTrackPlaying ? 'rgba(16,185,129,0.05)' : isFinished ? 'rgba(16,185,129,0.03)' : 'rgba(255,255,255,0.02)',
+              background: isTrackPlaying ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.02)',
               borderRadius: 4,
-              border: isTrackPlaying ? '1px solid rgba(16,185,129,0.15)' : isFinished ? '1px solid rgba(16,185,129,0.1)' : '1px solid rgba(255,255,255,0.05)'
+              border: isTrackPlaying ? '1px solid rgba(16,185,129,0.15)' : '1px solid rgba(255,255,255,0.05)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: 14 }}>🎵</span>
+              <span style={{ fontSize: 14 }}>🎵</span>
+              
+              <span style={{
+                fontSize: 12,
+                color: 'white',
+                fontWeight: isTrackPlaying ? 'bold' : 'normal',
+                minWidth: 80,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {track.name}
+              </span>
+              
+              {track.instrument && (
                 <span style={{
-                  fontSize: 12,
-                  color: 'white',
-                  fontWeight: isTrackPlaying ? 'bold' : 'normal',
-                  minWidth: 80,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
+                  fontSize: 10,
+                  color: '#10b981',
+                  background: 'rgba(16,185,129,0.1)',
+                  padding: '2px 8px',
+                  borderRadius: 10
                 }}>
-                  {track.name}
+                  {track.instrument}
                 </span>
-                {track.instrument && (
-                  <span style={{
-                    fontSize: 10,
-                    color: '#10b981',
-                    background: 'rgba(16,185,129,0.1)',
-                    padding: '2px 8px',
-                    borderRadius: 10
-                  }}>
-                    {track.instrument}
-                  </span>
-                )}
-                {isTrackPlaying && (
-                  <span style={{ fontSize: 10, color: '#10b981', marginLeft: 'auto' }}>🔊</span>
-                )}
-                {isFinished && (
-                  <span style={{ fontSize: 10, color: '#10b981', marginLeft: 'auto' }}>✅ Terminada</span>
-                )}
-                {trackDuration > 0 && (
-                  <span style={{
-                    fontSize: 10,
-                    color: isFinished ? '#10b981' : '#6b7280',
-                    minWidth: 80,
-                    textAlign: 'right'
-                  }}>
-                    {isFinished ? formatTime(trackDuration) : `${formatTime(trackDuration * trackProgress)} / ${formatTime(trackDuration)}`}
-                  </span>
-                )}
-                {/* Barra de progreso individual */}
-                {trackDuration > 0 && (
-                  <div style={{
-                    width: '60px',
-                    height: '4px',
-                    background: 'rgba(255,255,255,0.1)',
-                    borderRadius: 2,
-                    overflow: 'hidden'
-                  }}>
-                    <div style={{
-                      width: `${trackProgress * 100}%`,
-                      height: '100%',
-                      background: isFinished ? '#10b981' : (isTrackPlaying ? '#10b981' : '#4a5568'),
-                      borderRadius: 2,
-                      transition: 'width 0.1s linear'
-                    }} />
-                  </div>
-                )}
+              )}
+              
+              {/* ✅ Barra de progreso individual (simple) */}
+              <div style={{
+                flex: 1,
+                height: '6px',
+                background: 'rgba(255,255,255,0.05)',
+                borderRadius: 3,
+                overflow: 'hidden',
+                minWidth: 80
+              }}>
+                <div style={{
+                  width: `${trackProgress * 100}%`,
+                  height: '100%',
+                  background: isFinished ? '#10b981' : (isTrackPlaying ? '#10b981' : '#4a5568'),
+                  borderRadius: 3,
+                  transition: 'width 0.1s linear'
+                }} />
               </div>
-              {/* Canvas con escala proporcional */}
-              <div style={{ position: 'relative', width: '100%' }}>
-                <canvas
-                  ref={(el) => { canvasRefs.current[track.id] = el; }}
-                  width={800}
-                  height={30}
-                  style={{
-                    width: '100%',
-                    height: '30px',
-                    background: 'rgba(0,0,0,0.15)',
-                    borderRadius: 3,
-                    display: 'block'
-                  }}
-                />
-              </div>
+              
+              {/* ✅ Duración y progreso */}
+              <span style={{
+                fontSize: 10,
+                color: isFinished ? '#10b981' : '#6b7280',
+                minWidth: 50,
+                textAlign: 'right'
+              }}>
+                {isFinished ? formatTime(trackDuration) : formatTime(trackDuration * trackProgress)}
+              </span>
+              
+              {isTrackPlaying && (
+                <span style={{ fontSize: 10, color: '#10b981' }}>🔊</span>
+              )}
+              {isFinished && (
+                <span style={{ fontSize: 10, color: '#10b981' }}>✅</span>
+              )}
             </div>
           );
         })}
