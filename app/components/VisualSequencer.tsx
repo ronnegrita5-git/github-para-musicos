@@ -75,7 +75,7 @@ export default function VisualSequencer({
         </span>
       </div>
 
-      {/* Línea de tiempo principal */}
+      {/* Línea de tiempo principal (basada en la pista más larga) */}
       <div style={{ marginBottom: '8px' }}>
         <div style={{
           display: 'flex',
@@ -124,7 +124,7 @@ export default function VisualSequencer({
         </div>
       </div>
 
-      {/* ✅ Lista de pistas con barras de progreso SIMPLES */}
+      {/* ✅ Lista de pistas con DURACIÓN VISUAL */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -138,6 +138,8 @@ export default function VisualSequencer({
           const trackProgress = Math.min(currentTime / trackDuration, 1);
           const isFinished = trackProgress >= 1;
           const isTrackPlaying = isPlaying && selectedTracks.has(track.id);
+          // ✅ Porcentaje visual de la pista respecto al total
+          const widthPercentage = (trackDuration / totalDuration) * 100;
           
           return (
             <div key={track.id} style={{
@@ -149,13 +151,14 @@ export default function VisualSequencer({
               borderRadius: 4,
               border: isTrackPlaying ? '1px solid rgba(16,185,129,0.15)' : '1px solid rgba(255,255,255,0.05)'
             }}>
-              <span style={{ fontSize: 14 }}>🎵</span>
+              <span style={{ fontSize: 14, minWidth: 24 }}>🎵</span>
               
               <span style={{
                 fontSize: 12,
                 color: 'white',
                 fontWeight: isTrackPlaying ? 'bold' : 'normal',
                 minWidth: 80,
+                maxWidth: 120,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap'
@@ -169,49 +172,119 @@ export default function VisualSequencer({
                   color: '#10b981',
                   background: 'rgba(16,185,129,0.1)',
                   padding: '2px 8px',
-                  borderRadius: 10
+                  borderRadius: 10,
+                  whiteSpace: 'nowrap'
                 }}>
                   {track.instrument}
                 </span>
               )}
               
-              {/* ✅ Barra de progreso individual (simple) */}
+              {/* ✅ Barra de progreso con DURACIÓN VISUAL */}
               <div style={{
                 flex: 1,
-                height: '6px',
+                height: '20px',
                 background: 'rgba(255,255,255,0.05)',
                 borderRadius: 3,
                 overflow: 'hidden',
-                minWidth: 80
+                position: 'relative',
+                minWidth: 100
               }}>
+                {/* ✅ Fondo que representa la duración total de la pista */}
                 <div style={{
-                  width: `${trackProgress * 100}%`,
+                  width: `${widthPercentage}%`,
+                  height: '100%',
+                  background: 'rgba(255,255,255,0.03)',
+                  borderRight: '1px solid rgba(255,255,255,0.2)',
+                  position: 'absolute',
+                  left: 0,
+                  top: 0
+                }} />
+                
+                {/* ✅ Progreso de reproducción de esta pista */}
+                <div style={{
+                  width: `${trackProgress * widthPercentage}%`,
                   height: '100%',
                   background: isFinished ? '#10b981' : (isTrackPlaying ? '#10b981' : '#4a5568'),
                   borderRadius: 3,
-                  transition: 'width 0.1s linear'
+                  transition: 'width 0.1s linear',
+                  position: 'absolute',
+                  left: 0,
+                  top: 0
                 }} />
+                
+                {/* ✅ Marcador de posición actual */}
+                {isTrackPlaying && trackProgress < 1 && (
+                  <div style={{
+                    position: 'absolute',
+                    left: `${trackProgress * widthPercentage}%`,
+                    top: 0,
+                    width: '2px',
+                    height: '100%',
+                    background: 'white',
+                    borderRadius: 1,
+                    transform: 'translateX(-1px)'
+                  }} />
+                )}
+                
+                {/* ✅ Texto con duración dentro de la barra */}
+                <div style={{
+                  position: 'absolute',
+                  right: '4px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 9,
+                  color: 'rgba(255,255,255,0.5)',
+                  fontFamily: 'monospace',
+                  pointerEvents: 'none'
+                }}>
+                  {formatTime(trackDuration)}
+                </div>
+                
+                {/* ✅ Texto con progreso dentro de la barra */}
+                {trackProgress > 0.1 && (
+                  <div style={{
+                    position: 'absolute',
+                    left: '4px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontSize: 9,
+                    color: 'rgba(255,255,255,0.6)',
+                    fontFamily: 'monospace',
+                    pointerEvents: 'none'
+                  }}>
+                    {formatTime(trackDuration * trackProgress)}
+                  </div>
+                )}
               </div>
               
-              {/* ✅ Duración y progreso */}
-              <span style={{
-                fontSize: 10,
-                color: isFinished ? '#10b981' : '#6b7280',
-                minWidth: 50,
-                textAlign: 'right'
-              }}>
-                {isFinished ? formatTime(trackDuration) : formatTime(trackDuration * trackProgress)}
-              </span>
-              
+              {/* ✅ Indicadores de estado */}
               {isTrackPlaying && (
-                <span style={{ fontSize: 10, color: '#10b981' }}>🔊</span>
+                <span style={{ fontSize: 10, color: '#10b981', minWidth: 16 }}>🔊</span>
               )}
               {isFinished && (
-                <span style={{ fontSize: 10, color: '#10b981' }}>✅</span>
+                <span style={{ fontSize: 10, color: '#10b981', minWidth: 16 }}>✅</span>
+              )}
+              {!isTrackPlaying && !isFinished && (
+                <span style={{ fontSize: 10, color: '#6b7280', minWidth: 16 }}>⏸</span>
               )}
             </div>
           );
         })}
+      </div>
+      
+      {/* ✅ Leyenda */}
+      <div style={{
+        display: 'flex',
+        gap: '16px',
+        marginTop: '8px',
+        padding: '4px 8px',
+        fontSize: 10,
+        color: '#6b7280',
+        borderTop: '1px solid rgba(255,255,255,0.05)'
+      }}>
+        <span>⬜ Fondo = duración de la pista</span>
+        <span>🟩 Verde = progreso reproducido</span>
+        <span>⬛ Borde = fin de la pista</span>
       </div>
     </div>
   );
