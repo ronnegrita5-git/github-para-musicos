@@ -7,7 +7,6 @@ import { supabase } from "@/lib/supabase"
 import MultiUpload from "@/app/components/MultiUpload"
 import WebRecorder from "@/app/components/WebRecorder"
 import ForkModal from "@/app/components/ForkModal"
-import SimpleSequencer from "@/app/components/SimpleSequencer"
 
 interface Track {
   id: string
@@ -67,6 +66,14 @@ const INSTRUMENT_EMOJIS: Record<string, string> = {
   'Sintetizador': '🎹'
 }
 
+// ✅ Formatear tiempo
+const formatTime = (seconds: number) => {
+  if (!seconds || isNaN(seconds)) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
 export default function ProjectPage({ params }: { params: { id: string } }) {
   const { id } = params
   const { user } = useAuth()
@@ -83,15 +90,18 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
 
   const [masterVolume, setMasterVolume] = useState(0.8)
   const [trackVolumes, setTrackVolumes] = useState<Record<string, number>>({})
-  const [trackRealVolumes, setTrackRealVolumes] = useState<Record<string, number>>({})
-  const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [loopEnabled, setLoopEnabled] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [totalDuration, setTotalDuration] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioNodesRef = useRef<any[]>([])
   const masterGainRef = useRef<GainNode | null>(null)
   const audioCacheRef = useRef<Record<string, AudioBuffer>>({})
-  const isStoppedRef = useRef<boolean>(false) // ✅ Para saber si fue detenido manualmente
+  const animationRef = useRef<number | null>(null)
+  const startTimeRef = useRef<number>(0)
+  const isPlayingRef = useRef(false)
 
   const loadTracks = async () => {
     try {
@@ -105,13 +115,19 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       setTracks(data || [])
       
       const volumes: Record<string, number> = {}
-      const realVolumes: Record<string, number> = {}
       data?.forEach(track => {
         volumes[track.id] = 0.8
-        realVolumes[track.id] = 0.8
       })
       setTrackVolumes(volumes)
-      setTrackRealVolumes(realVolumes)
+      
+      // ✅ Calcular duración total
+      let maxDuration = 0
+      data?.forEach(track => {
+        if (track.duration && track.duration > maxDuration) {
+          maxDuration = track.duration
+        }
+      })
+      setTotalDuration(maxDuration || 1)
       
     } catch (error) {
       console.error("Error cargando pistas:", error)
@@ -164,10 +180,13 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       if (audioContextRef.current) {
         audioContextRef.current.close()
       }
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
     }
   }, [id])
 
-  // ============ MEZCLADOR DE AUDIO ============
+  // ============ AUDIO ============
   const initAudioContext = () => {
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -207,7 +226,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  const playTrack = async (track: Track) => {
+  const playTrack = async (track: Track, startTime: number = 0) => {
     const ctx = initAudioContext()
     
     if (!masterGainRef.current) {
@@ -224,7 +243,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     source.loop = loopEnabled
     
     const gainNode = ctx.createGain()
-    const volume = trackVolumes[track.id] || 0
+    const volume = trackVolumes[track.id] || 0.8
     gainNode.gain.value = volume
     
     source.connect(gainNode)
@@ -234,33 +253,30 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       node: gainNode,
       source: source,
       trackId: track.id,
-      buffer: audioBuffer,
-      isStopped: false // ✅ Para saber si fue detenido manualmente
+      buffer: audioBuffer
     }
     
     audioNodesRef.current.push(nodeData)
     
-    // ✅ onended solo se ejecuta cuando la pista termina naturalmente
     source.onended = () => {
-      // Solo eliminar si no fue detenido manualmente
-      if (!nodeData.isStopped) {
-        const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
-        if (index !== -1) {
-          audioNodesRef.current.splice(index, 1)
-          if (audioNodesRef.current.length === 0) {
-            setIsPlaying(false)
-          }
+      const index = audioNodesRef.current.findIndex(n => n.trackId === track.id)
+      if (index !== -1) {
+        audioNodesRef.current.splice(index, 1)
+        if (audioNodesRef.current.length === 0) {
+          setIsPlaying(false)
+          isPlayingRef.current = false
         }
       }
     }
     
-    source.start(0)
-    setIsPlaying(true)
+    const offset = Math.min(startTime, audioBuffer.duration)
+    source.start(0, offset)
+    return audioBuffer.duration
   }
 
   const playAllSelectedTracks = async () => {
     stopAllAudio()
-    isStoppedRef.current = false
+    setCurrentTime(0)
     
     if (selectedTracks.size === 0) {
       alert('Selecciona al menos una pista para reproducir')
@@ -273,31 +289,100 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       return
     }
 
-    setIsLoadingAudio(true)
-
-    try {
-      for (const track of selected) {
-        await playTrack(track)
+    let maxDuration = 0
+    for (const track of selected) {
+      const duration = await playTrack(track, 0)
+      if (duration && duration > maxDuration) {
+        maxDuration = duration
       }
-    } catch (error) {
-      console.error('Error al reproducir:', error)
-      alert('Error al reproducir las pistas')
-    } finally {
-      setIsLoadingAudio(false)
     }
+    setTotalDuration(maxDuration || 1)
+    
+    isPlayingRef.current = true
+    setIsPlaying(true)
+    startTimeRef.current = Date.now()
+    
+    // ✅ Iniciar actualización de progreso
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current)
+    }
+    
+    const updateProgress = () => {
+      if (!isPlayingRef.current) {
+        return
+      }
+      const elapsed = (Date.now() - startTimeRef.current) / 1000
+      const newTime = Math.min(elapsed, totalDuration)
+      setCurrentTime(newTime)
+      
+      if (newTime < totalDuration) {
+        animationRef.current = requestAnimationFrame(updateProgress)
+      } else if (loopEnabled) {
+        // Reiniciar
+        startTimeRef.current = Date.now()
+        animationRef.current = requestAnimationFrame(updateProgress)
+      } else {
+        stopAllAudio()
+      }
+    }
+    
+    animationRef.current = requestAnimationFrame(updateProgress)
   }
 
   const stopAllAudio = () => {
-    isStoppedRef.current = true
-    
-    audioNodesRef.current.forEach((nodeData) => {
-      nodeData.isStopped = true // ✅ Marcar como detenido manualmente
-      try {
-        nodeData.source.stop()
-      } catch (e) {}
+    audioNodesRef.current.forEach(({ source }) => {
+      try { source.stop() } catch (e) {}
     })
     audioNodesRef.current = []
     setIsPlaying(false)
+    isPlayingRef.current = false
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current)
+      animationRef.current = null
+    }
+  }
+
+  const seekTo = (position: number) => {
+    const newTime = Math.max(0, Math.min(position, totalDuration))
+    setCurrentTime(newTime)
+    
+    if (isPlayingRef.current) {
+      // Reiniciar desde la nueva posición
+      const wasPlaying = isPlayingRef.current
+      stopAllAudio()
+      setTimeout(() => {
+        if (wasPlaying) {
+          // Reproducir desde la nueva posición
+          const selected = tracks.filter(t => selectedTracks.has(t.id) && t.audio_url)
+          selected.forEach(async (track) => {
+            await playTrack(track, newTime)
+          })
+          isPlayingRef.current = true
+          setIsPlaying(true)
+          startTimeRef.current = Date.now() - newTime * 1000
+          
+          // Reanudar actualización de progreso
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current)
+          }
+          const updateProgress = () => {
+            if (!isPlayingRef.current) return
+            const elapsed = (Date.now() - startTimeRef.current) / 1000
+            const time = Math.min(elapsed, totalDuration)
+            setCurrentTime(time)
+            if (time < totalDuration) {
+              animationRef.current = requestAnimationFrame(updateProgress)
+            } else if (loopEnabled) {
+              startTimeRef.current = Date.now()
+              animationRef.current = requestAnimationFrame(updateProgress)
+            } else {
+              stopAllAudio()
+            }
+          }
+          animationRef.current = requestAnimationFrame(updateProgress)
+        }
+      }, 50)
+    }
   }
 
   const updateMasterVolume = (value: number) => {
@@ -314,10 +399,6 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
       ...prev,
       [trackId]: newVolume
     }))
-    setTrackRealVolumes(prev => ({
-      ...prev,
-      [trackId]: newVolume
-    }))
     
     const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
     if (audioNode) {
@@ -325,77 +406,24 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
     }
   }
 
-  const toggleTrackSelection = async (trackId: string) => {
+  const toggleTrackSelection = (trackId: string) => {
     const newSelected = new Set(selectedTracks)
-    const isSelected = newSelected.has(trackId)
-    const track = tracks.find(t => t.id === trackId)
-    
-    if (isSelected) {
+    if (newSelected.has(trackId)) {
       newSelected.delete(trackId)
-      setTrackVolumes(prev => ({
-        ...prev,
-        [trackId]: 0
-      }))
-      
-      const audioNode = audioNodesRef.current.find(n => n.trackId === trackId)
-      if (audioNode) {
-        audioNode.node.gain.value = 0
-      }
     } else {
       newSelected.add(trackId)
-      const realVolume = trackRealVolumes[trackId] || 0.8
-      setTrackVolumes(prev => ({
-        ...prev,
-        [trackId]: realVolume
-      }))
-      
-      if (audioNodesRef.current.length > 0 && track && track.audio_url) {
-        const existingNode = audioNodesRef.current.find(n => n.trackId === trackId)
-        if (!existingNode) {
-          await playTrack(track)
-        } else {
-          existingNode.node.gain.value = realVolume
-        }
-      } else if (track && track.audio_url) {
-        await playTrack(track)
-      }
     }
-    
     setSelectedTracks(newSelected)
   }
 
-  const selectAllTracks = async () => {
+  const selectAllTracks = () => {
     const allIds = new Set(tracks.map(t => t.id))
     setSelectedTracks(allIds)
-    
-    const newVolumes: Record<string, number> = {}
-    tracks.forEach(track => {
-      newVolumes[track.id] = trackRealVolumes[track.id] || 0.8
-    })
-    setTrackVolumes(newVolumes)
-    
-    if (audioNodesRef.current.length > 0) {
-      const currentlyPlaying = new Set(audioNodesRef.current.map(n => n.trackId))
-      const missing = [...allIds].filter(id => !currentlyPlaying.has(id))
-      for (const trackId of missing) {
-        const track = tracks.find(t => t.id === trackId)
-        if (track && track.audio_url) {
-          await playTrack(track)
-        }
-      }
-    }
   }
 
   const deselectAllTracks = () => {
     setSelectedTracks(new Set())
-    const newVolumes: Record<string, number> = {}
-    tracks.forEach(track => {
-      newVolumes[track.id] = 0
-    })
-    setTrackVolumes(newVolumes)
-    audioNodesRef.current.forEach(({ node }) => {
-      node.gain.value = 0
-    })
+    stopAllAudio()
   }
 
   const deleteTrack = async (trackId: string) => {
@@ -526,6 +554,7 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
   const categoryEmoji = project.category ? CATEGORY_EMOJIS[project.category] || '🎵' : '🎵'
 
   const selectedCount = selectedTracks.size
+  const progressPercentage = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white" }}>
@@ -664,6 +693,208 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
           )}
         </div>
 
+        {/* ============ CONTROLES DE REPRODUCCIÓN ============ */}
+        {selectedCount > 0 && (
+          <div style={{ 
+            marginTop: 20,
+            padding: "16px",
+            background: "rgba(255,255,255,0.05)",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.1)"
+          }}>
+            {/* Barra de progreso */}
+            <div style={{ marginBottom: "12px" }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: 12,
+                color: '#6b7280',
+                marginBottom: '4px'
+              }}>
+                <span>⏱️ {formatTime(currentTime)}</span>
+                <span>⏱️ {formatTime(totalDuration)}</span>
+              </div>
+              <div
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = e.clientX - rect.left;
+                  const percentage = Math.max(0, Math.min(1, x / rect.width));
+                  seekTo(percentage * totalDuration);
+                }}
+                style={{
+                  width: '100%',
+                  height: '16px',
+                  background: 'rgba(255,255,255,0.05)',
+                  borderRadius: 4,
+                  overflow: 'hidden',
+                  position: 'relative',
+                  cursor: 'pointer'
+                }}
+              >
+                <div style={{
+                  width: `${progressPercentage}%`,
+                  height: '100%',
+                  background: 'rgba(16,185,129,0.3)',
+                  borderRadius: 4
+                }} />
+                <div style={{
+                  position: 'absolute',
+                  left: `${progressPercentage}%`,
+                  top: 0,
+                  width: '3px',
+                  height: '100%',
+                  background: '#10b981',
+                  borderRadius: 2,
+                  transform: 'translateX(-1.5px)'
+                }} />
+              </div>
+            </div>
+
+            {/* Botones de navegación */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              marginBottom: '12px',
+              justifyContent: 'center',
+              flexWrap: 'wrap'
+            }}>
+              <button
+                onClick={() => seekTo(0)}
+                style={{
+                  padding: '4px 10px',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: '#6b7280',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 14
+                }}
+                title="Inicio"
+              >
+                ⏮️
+              </button>
+              <button
+                onClick={() => seekTo(Math.max(0, currentTime - 5))}
+                style={{
+                  padding: '4px 10px',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: '#6b7280',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 14
+                }}
+                title="-5s"
+              >
+                ⏪
+              </button>
+              <button
+                onClick={() => seekTo(Math.min(totalDuration, currentTime + 5))}
+                style={{
+                  padding: '4px 10px',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: '#6b7280',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 14
+                }}
+                title="+5s"
+              >
+                ⏩
+              </button>
+              <button
+                onClick={() => seekTo(totalDuration)}
+                style={{
+                  padding: '4px 10px',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: '#6b7280',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 14
+                }}
+                title="Fin"
+              >
+                ⏭️
+              </button>
+            </div>
+
+            {/* Controles de volumen y loop */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              flexWrap: 'wrap',
+              justifyContent: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>🔊</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={masterVolume}
+                  onChange={(e) => updateMasterVolume(parseFloat(e.target.value))}
+                  style={{ width: 80, accentColor: '#10b981' }}
+                />
+                <span style={{ fontSize: 11, color: '#6b7280', minWidth: 30 }}>
+                  {Math.round(masterVolume * 100)}%
+                </span>
+              </div>
+              
+              <button
+                onClick={() => setLoopEnabled(!loopEnabled)}
+                style={{
+                  padding: '4px 12px',
+                  background: loopEnabled ? '#10b981' : 'rgba(255,255,255,0.05)',
+                  color: loopEnabled ? 'white' : '#6b7280',
+                  border: loopEnabled ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 12
+                }}
+              >
+                {loopEnabled ? '🔁 Loop ON' : '➡️ Loop OFF'}
+              </button>
+              
+              <button
+                onClick={stopAllAudio}
+                style={{
+                  padding: '6px 16px',
+                  background: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 'bold'
+                }}
+              >
+                ⏹ Detener
+              </button>
+              
+              <button
+                onClick={playAllSelectedTracks}
+                style={{
+                  padding: '6px 16px',
+                  background: isPlaying ? '#fbbf24' : '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 'bold'
+                }}
+              >
+                {isPlaying ? '🔊 Reproduciendo' : '▶️ Reproducir'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ============ SECCIÓN DE PISTAS ============ */}
         <div style={{ marginTop: 32 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: "8px" }}>
@@ -734,181 +965,141 @@ export default function ProjectPage({ params }: { params: { id: string } }) {
               {isOwner ? "📭 No hay pistas aún. Sube una pista o graba audio." : "📭 Este proyecto aún no tiene pistas."}
             </p>
           ) : (
-            <>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {tracks.map((track) => {
-                  const hasAudio = track.audio_url && track.audio_url.length > 0
-                  const isSelected = selectedTracks.has(track.id)
-                  const volume = trackVolumes[track.id] || 0
-                  const instrumentEmoji = track.instrument ? INSTRUMENT_EMOJIS[track.instrument] || '🎵' : '🎵'
-                  const isCurrentlyPlaying = audioNodesRef.current.some(n => n.trackId === track.id)
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {tracks.map((track) => {
+                const hasAudio = track.audio_url && track.audio_url.length > 0
+                const isSelected = selectedTracks.has(track.id)
+                const volume = trackVolumes[track.id] || 0.8
+                const instrumentEmoji = track.instrument ? INSTRUMENT_EMOJIS[track.instrument] || '🎵' : '🎵'
 
-                  return (
-                    <div key={track.id} style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      padding: "12px 16px",
-                      background: isSelected ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
-                      borderRadius: 8,
-                      border: isSelected ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)",
-                      opacity: hasAudio ? 1 : 0.5
-                    }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div 
-                          style={{ 
-                            display: "flex", 
-                            alignItems: "center", 
-                            gap: "12px",
-                            cursor: hasAudio ? "pointer" : "default",
-                            flex: 1
-                          }}
-                          onClick={() => {
-                            if (hasAudio) {
-                              toggleTrackSelection(track.id)
-                            }
-                          }}
-                        >
-                          <span style={{ fontSize: 18 }}>
-                            {isSelected ? "☑ " : hasAudio ? "☐ " : "⛔ "}
+                return (
+                  <div key={track.id} style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    padding: "12px 16px",
+                    background: isSelected ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
+                    borderRadius: 8,
+                    border: isSelected ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)",
+                    opacity: hasAudio ? 1 : 0.5
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div 
+                        style={{ 
+                          display: "flex", 
+                          alignItems: "center", 
+                          gap: "12px",
+                          cursor: hasAudio ? "pointer" : "default",
+                          flex: 1
+                        }}
+                        onClick={() => {
+                          if (hasAudio) {
+                            toggleTrackSelection(track.id)
+                          }
+                        }}
+                      >
+                        <span style={{ fontSize: 18 }}>
+                          {isSelected ? "☑ " : hasAudio ? "☐ " : "⛔ "}
+                        </span>
+                        <div>
+                          <p style={{ margin: 0, color: "white", fontWeight: isSelected ? "bold" : "normal" }}>
+                            {track.name || "Pista sin nombre"}
+                            {track.instrument && (
+                              <span style={{ 
+                                fontSize: 12, 
+                                color: "#10b981",
+                                marginLeft: 8,
+                                background: "rgba(16,185,129,0.1)",
+                                padding: "2px 8px",
+                                borderRadius: 12
+                              }}>
+                                {instrumentEmoji} {track.instrument}
+                              </span>
+                            )}
+                            {track.duration && (
+                              <span style={{ 
+                                fontSize: 11, 
+                                color: "#6b7280",
+                                marginLeft: 8
+                              }}>
+                                ⏱️ {formatTime(track.duration)}
+                              </span>
+                            )}
+                          </p>
+                          <span style={{ color: "#6b7280", fontSize: 12 }}>
+                            {new Date(track.created_at).toLocaleDateString()}
+                            {track.size && ` · ${(track.size / 1024 / 1024).toFixed(1)} MB`}
                           </span>
-                          <div>
-                            <p style={{ margin: 0, color: "white", fontWeight: isSelected ? "bold" : "normal" }}>
-                              {track.name || "Pista sin nombre"}
-                              {track.instrument && (
-                                <span style={{ 
-                                  fontSize: 12, 
-                                  color: "#10b981",
-                                  marginLeft: 8,
-                                  background: "rgba(16,185,129,0.1)",
-                                  padding: "2px 8px",
-                                  borderRadius: 12
-                                }}>
-                                  {instrumentEmoji} {track.instrument}
-                                </span>
-                              )}
-                              {isSelected && isCurrentlyPlaying && (
-                                <span style={{ 
-                                  fontSize: 10, 
-                                  color: "#10b981",
-                                  marginLeft: 8
-                                }}>
-                                  🔊 Sonando
-                                </span>
-                              )}
-                              {!isSelected && volume === 0 && (
-                                <span style={{ 
-                                  fontSize: 10, 
-                                  color: "#6b7280",
-                                  marginLeft: 8
-                                }}>
-                                  🔇 Silenciada
-                                </span>
-                              )}
-                            </p>
-                            <span style={{ color: "#6b7280", fontSize: 12 }}>
-                              {new Date(track.created_at).toLocaleDateString()}
-                              {track.size && ` · ${(track.size / 1024 / 1024).toFixed(1)} MB`}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          {user && hasAudio && (
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation()
-                                await downloadSingleTrack(track)
-                              }}
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                color: '#8b5cf6',
-                                cursor: 'pointer',
-                                fontSize: 16,
-                                padding: '0 4px'
-                              }}
-                              title="Descargar pista"
-                            >
-                              📥
-                            </button>
-                          )}
-                          {isOwner && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                deleteTrack(track.id)
-                              }}
-                              style={{
-                                background: "none",
-                                border: "none",
-                                color: "#ef4444",
-                                cursor: "pointer",
-                                fontSize: 16,
-                                padding: "0 4px"
-                              }}
-                              title="Eliminar pista"
-                            >
-                              🗑️
-                            </button>
-                          )}
                         </div>
                       </div>
                       
-                      {isSelected && hasAudio && (
-                        <div style={{ 
-                          display: "flex", 
-                          alignItems: "center", 
-                          gap: "8px", 
-                          marginTop: "8px",
-                          paddingLeft: "32px"
-                        }}>
-                          <span style={{ fontSize: 12, color: "#6b7280", minWidth: "40px" }}>
-                            {Math.round(volume * 100)}%
-                          </span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            value={volume}
-                            onChange={(e) => {
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        {isSelected && (
+                          <>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.01"
+                              value={volume}
+                              onChange={(e) => {
+                                e.stopPropagation()
+                                updateTrackVolume(track.id, parseFloat(e.target.value))
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                width: 60,
+                                accentColor: '#10b981'
+                              }}
+                            />
+                            <span style={{ fontSize: 10, color: '#6b7280', minWidth: 30 }}>
+                              {Math.round(volume * 100)}%
+                            </span>
+                          </>
+                        )}
+                        {user && hasAudio && (
+                          <button
+                            onClick={async (e) => {
                               e.stopPropagation()
-                              updateTrackVolume(track.id, parseFloat(e.target.value))
+                              await downloadSingleTrack(track)
                             }}
-                            onClick={(e) => e.stopPropagation()}
                             style={{
-                              flex: 1,
-                              maxWidth: "200px",
-                              accentColor: "#10b981"
+                              background: 'none',
+                              border: 'none',
+                              color: '#8b5cf6',
+                              cursor: 'pointer',
+                              fontSize: 16,
+                              padding: '0 4px'
                             }}
-                          />
-                          <span style={{ fontSize: 11, color: "#6b7280" }}>🔊</span>
-                        </div>
-                      )}
+                            title="Descargar pista"
+                          >
+                            📥
+                          </button>
+                        )}
+                        {isOwner && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              deleteTrack(track.id)
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#ef4444",
+                              cursor: "pointer",
+                              fontSize: 16,
+                              padding: "0 4px"
+                            }}
+                            title="Eliminar pista"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  )
-                })}
-              </div>
-
-              {/* ============ SECUENCIADOR ============ */}
-              {selectedCount > 0 && (
-                <div style={{ marginTop: 20 }}>
-                  <SimpleSequencer
-                    tracks={tracks}
-                    selectedTracks={selectedTracks}
-                    isPlaying={isPlaying}
-                    onPlay={playAllSelectedTracks}
-                    onStop={stopAllAudio}
-                    onLoopToggle={() => setLoopEnabled(!loopEnabled)}
-                    loopEnabled={loopEnabled}
-                    masterVolume={masterVolume}
-                    onMasterVolumeChange={updateMasterVolume}
-                    trackVolumes={trackVolumes}
-                    onTrackVolumeChange={updateTrackVolume}
-                  />
-                </div>
-              )}
-            </>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
 
