@@ -94,7 +94,7 @@ export default function VisualSequencer({
         
         // ✅ Calcular progreso de esta pista específica
         const trackDuration = track.duration || 1;
-        // ✅ El progreso de la pista es relativo a su propia duración
+        // ✅ El progreso es relativo a su propia duración, y se queda en 1 (100%) cuando termina
         const trackProgress = Math.min(currentTime / trackDuration, 1);
         
         waveform.forEach((value, index) => {
@@ -103,7 +103,14 @@ export default function VisualSequencer({
           const y = mid - barHeight / 2;
           const isPlayed = x / width < trackProgress;
           
-          ctx.fillStyle = isPlayed ? '#10b981' : '#4a5568';
+          // ✅ Si la pista ya terminó (progreso = 1), toda la barra se pone verde
+          if (trackProgress >= 1) {
+            ctx.fillStyle = '#10b981';
+          } else if (isPlayed) {
+            ctx.fillStyle = '#10b981';
+          } else {
+            ctx.fillStyle = '#4a5568';
+          }
           ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
         });
       }
@@ -135,6 +142,12 @@ export default function VisualSequencer({
     );
   }
 
+  // ✅ Encontrar la pista más larga para el tiempo total
+  const longestTrack = visibleTracks.reduce((max, t) => {
+    const dur = t.duration || 0;
+    return dur > (max.duration || 0) ? t : max;
+  }, { duration: 0 } as Track);
+
   return (
     <div ref={containerRef} style={{
       padding: '12px',
@@ -154,11 +167,11 @@ export default function VisualSequencer({
           🎛️ Secuenciador
         </span>
         <span style={{ fontSize: 12, color: '#6b7280' }}>
-          {visibleTracks.length} pistas
+          {visibleTracks.length} pistas · {formatTime(totalDuration)}
         </span>
       </div>
 
-      {/* Línea de tiempo principal */}
+      {/* Línea de tiempo principal (basada en la pista más larga) */}
       <div style={{ marginBottom: '8px' }}>
         <div style={{
           display: 'flex',
@@ -219,8 +232,10 @@ export default function VisualSequencer({
           const isTrackPlaying = isPlaying && selectedTracks.has(track.id);
           // ✅ Cada pista tiene su propia duración
           const trackDuration = track.duration || 0;
-          // ✅ El progreso de la pista es relativo a su duración
+          // ✅ El progreso de la pista es relativo a su duración, limitado a 1
           const trackProgress = trackDuration > 0 ? Math.min(currentTime / trackDuration, 1) : 0;
+          // ✅ Si la pista ya terminó
+          const isFinished = trackProgress >= 1 && trackDuration > 0;
           
           return (
             <div key={track.id} style={{
@@ -228,16 +243,16 @@ export default function VisualSequencer({
               flexDirection: 'column',
               gap: '2px',
               padding: '6px 8px',
-              background: isTrackPlaying ? 'rgba(16,185,129,0.05)' : 'rgba(255,255,255,0.02)',
+              background: isTrackPlaying ? 'rgba(16,185,129,0.05)' : isFinished ? 'rgba(16,185,129,0.03)' : 'rgba(255,255,255,0.02)',
               borderRadius: 4,
-              border: isTrackPlaying ? '1px solid rgba(16,185,129,0.15)' : '1px solid rgba(255,255,255,0.05)'
+              border: isTrackPlaying ? '1px solid rgba(16,185,129,0.15)' : isFinished ? '1px solid rgba(16,185,129,0.1)' : '1px solid rgba(255,255,255,0.05)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: 14 }}>🎵</span>
                 <span style={{
                   fontSize: 12,
                   color: 'white',
-                  fontWeight: isTrackPlaying ? 'bold' : 'normal',
+                  fontWeight: isTrackPlaying ? 'bold' : isFinished ? 'normal' : 'normal',
                   minWidth: 80,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -265,15 +280,24 @@ export default function VisualSequencer({
                     🔊
                   </span>
                 )}
+                {isFinished && (
+                  <span style={{
+                    fontSize: 10,
+                    color: '#10b981',
+                    marginLeft: 'auto'
+                  }}>
+                    ✅ Terminada
+                  </span>
+                )}
                 {/* ✅ Mostrar duración de la pista y progreso */}
                 {trackDuration > 0 && (
                   <span style={{
                     fontSize: 10,
-                    color: '#6b7280',
+                    color: isFinished ? '#10b981' : '#6b7280',
                     minWidth: 80,
                     textAlign: 'right'
                   }}>
-                    {formatTime(trackDuration * trackProgress)} / {formatTime(trackDuration)}
+                    {isFinished ? formatTime(trackDuration) : `${formatTime(trackDuration * trackProgress)} / ${formatTime(trackDuration)}`}
                   </span>
                 )}
                 {/* ✅ Pequeña barra de progreso individual */}
@@ -288,7 +312,7 @@ export default function VisualSequencer({
                     <div style={{
                       width: `${trackProgress * 100}%`,
                       height: '100%',
-                      background: isTrackPlaying ? '#10b981' : '#4a5568',
+                      background: isFinished ? '#10b981' : (isTrackPlaying ? '#10b981' : '#4a5568'),
                       borderRadius: 2,
                       transition: 'width 0.1s linear'
                     }} />
