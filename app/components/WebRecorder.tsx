@@ -46,6 +46,7 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (projectCategory && CATEGORIES[projectCategory as keyof typeof CATEGORIES]) {
@@ -84,15 +85,14 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
     }
 
     try {
-      // ✅ Configuración de audio de alta calidad
+      // ✅ Configuración de audio de alta calidad (latency eliminado)
       const constraints: MediaStreamConstraints = {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
           sampleRate: 48000,
-          channelCount: 2,
-          latency: 0.01
+          channelCount: 2
         }
       };
 
@@ -163,9 +163,13 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
         if (analyserRef.current) {
           analyserRef.current = null;
         }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
       };
 
-      mediaRecorder.start(1000); // Grabar en segmentos de 1 segundo
+      mediaRecorder.start(1000);
       setIsRecording(true);
       setIsMonitoring(true);
       
@@ -188,7 +192,13 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
     const height = canvas.height;
 
     const draw = () => {
-      if (!isMonitoring && !isRecording) return;
+      if (!isMonitoring && !isRecording) {
+        // ✅ Limpiar canvas cuando no hay monitoreo
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(0, 0, width, height);
+        return;
+      }
       
       analyser.getByteFrequencyData(dataArray);
       
@@ -217,7 +227,7 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
         x += barWidth + 1;
       }
       
-      requestAnimationFrame(draw);
+      animationFrameRef.current = requestAnimationFrame(draw);
     };
     
     draw();
@@ -230,6 +240,10 @@ export default function WebRecorder({ projectId, onRecordingComplete, projectCat
       setIsRecording(false);
       if (audioContextRef.current) {
         audioContextRef.current.close();
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     }
   };
