@@ -53,7 +53,6 @@ export default function JamWebPage() {
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
   const [isMonitoring, setIsMonitoring] = useState(false)
-  // ✅ Volumen de monitorización ahora de 0 a 2 (x2 amplificación)
   const [monitorVolume, setMonitorVolume] = useState(1.0)
   
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -61,6 +60,7 @@ export default function JamWebPage() {
   const channelRef = useRef<any>(null)
   const userIdRef = useRef<string>("")
   const audioContextRef = useRef<AudioContext | null>(null)
+  const monitorSourceRef = useRef<any>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
 
   const PEER_CONFIG = {
@@ -82,18 +82,19 @@ export default function JamWebPage() {
       console.log('🎤 Solicitando micrófono...')
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
           sampleRate: 48000
         },
         video: false
       })
       
       localStreamRef.current = stream
-      console.log('✅ Micrófono obtenido:', stream.getAudioTracks().length, 'tracks')
+      console.log('✅ Micrófono obtenido')
       
-      await enableLocalMonitoring(stream)
+      // ✅ Activar monitorización automáticamente
+      await enableMonitoring(stream)
       
       setAudioTest("✅ Micrófono + Monitor")
       addMessage("Sistema", "🎤 Micrófono conectado")
@@ -106,65 +107,79 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ ACTIVAR MONITORIZACIÓN CON GANANCIA EXTRA
-  const enableLocalMonitoring = async (stream: MediaStream) => {
+  // ✅ MONITORIZACIÓN DIRECTA - SIMPLE Y EFECTIVA
+  const enableMonitoring = async (stream: MediaStream) => {
     try {
+      // Cerrar contexto anterior si existe
       if (audioContextRef.current) {
         await audioContextRef.current.close()
         audioContextRef.current = null
       }
       
-      const ctx = new AudioContext({ sampleRate: 48000 })
+      // Crear nuevo AudioContext
+      const ctx = new AudioContext()
       audioContextRef.current = ctx
       
+      // Crear fuente desde el stream del micrófono
       const source = ctx.createMediaStreamSource(stream)
+      monitorSourceRef.current = source
       
-      // ✅ Primer gain para control de volumen (0-2)
+      // Crear gain para control de volumen
       const gain = ctx.createGain()
-      gain.gain.value = monitorVolume
-      
-      // ✅ Segundo gain para amplificación extra (x1.5 fijo)
-      const boostGain = ctx.createGain()
-      boostGain.gain.value = 1.5 // Amplificación extra fija
-      
-      source.connect(gain)
-      gain.connect(boostGain)
-      boostGain.connect(ctx.destination)
-      
+      gain.gain.value = monitorVolume * 0.8 // Volumen inicial
       monitorGainRef.current = gain
+      
+      // Conectar: micrófono → gain → salida (auriculares/altavoces)
+      source.connect(gain)
+      gain.connect(ctx.destination)
+      
       setIsMonitoring(true)
       
-      console.log('🔊 Monitorización activada con ganancia extra')
-      addMessage("Sistema", "🔊 Monitorización activada (volumen amplificado)")
+      console.log('✅ Monitorización activada - Te escuchas en tiempo real')
+      addMessage("Sistema", "🔊 Monitorización activada (te escuchas a ti mismo)")
       
+      // Reanudar contexto si está suspendido
       if (ctx.state === 'suspended') {
         await ctx.resume()
-        console.log('▶️ AudioContext reanudado')
       }
       
     } catch (error) {
-      console.error('❌ Error al activar monitorización:', error)
-      addMessage("Sistema", "⚠️ No se pudo activar la monitorización local")
-    }
-  }
-
-  // ✅ ACTUALIZAR VOLUMEN DE MONITORIZACIÓN (0 a 2)
-  const updateMonitorVolume = (value: number) => {
-    const newVolume = Math.max(0, Math.min(2, value))
-    setMonitorVolume(newVolume)
-    if (monitorGainRef.current) {
-      monitorGainRef.current.gain.value = newVolume
+      console.error('❌ Error en monitorización:', error)
+      addMessage("Sistema", "⚠️ Error en monitorización")
     }
   }
 
   const disableMonitoring = async () => {
-    if (audioContextRef.current) {
-      await audioContextRef.current.close()
-      audioContextRef.current = null
-      monitorGainRef.current = null
-      setIsMonitoring(false)
-      addMessage("Sistema", "🔇 Monitorización desactivada")
-      console.log('🔇 Monitorización desactivada')
+    try {
+      if (audioContextRef.current) {
+        await audioContextRef.current.close()
+        audioContextRef.current = null
+        monitorSourceRef.current = null
+        monitorGainRef.current = null
+        setIsMonitoring(false)
+        console.log('🔇 Monitorización desactivada')
+        addMessage("Sistema", "🔇 Monitorización desactivada")
+      }
+    } catch (error) {
+      console.error('❌ Error al desactivar monitorización:', error)
+    }
+  }
+
+  const updateMonitorVolume = (value: number) => {
+    const newVolume = Math.max(0, Math.min(1.5, value))
+    setMonitorVolume(newVolume)
+    if (monitorGainRef.current) {
+      monitorGainRef.current.gain.value = newVolume * 0.8
+    }
+  }
+
+  const toggleMonitoring = async () => {
+    if (isMonitoring) {
+      await disableMonitoring()
+    } else {
+      if (localStreamRef.current) {
+        await enableMonitoring(localStreamRef.current)
+      }
     }
   }
 
@@ -437,16 +452,6 @@ export default function JamWebPage() {
     }
   }
 
-  const toggleMonitoring = async () => {
-    if (isMonitoring) {
-      await disableMonitoring()
-    } else {
-      if (localStreamRef.current) {
-        await enableLocalMonitoring(localStreamRef.current)
-      }
-    }
-  }
-
   const sendMessage = () => {
     if (!inputMessage.trim()) return
     addMessage(myName || user?.email || 'Anónimo', inputMessage)
@@ -561,7 +566,7 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>👑 Dueño</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
-          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor</span>}
+          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor ON</span>}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMuted ? "🔇" : "🎤"}</button>
@@ -573,7 +578,7 @@ export default function JamWebPage() {
               <input
                 type="range"
                 min="0"
-                max="2"
+                max="1.5"
                 step="0.01"
                 value={monitorVolume}
                 onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))}
