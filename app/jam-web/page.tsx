@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useState, useRef } from "react"
 import { useAuth } from "../context/AuthContext"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
@@ -67,7 +67,6 @@ export default function JamWebPage() {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   }
 
@@ -79,35 +78,29 @@ export default function JamWebPage() {
 
   const startLocalStream = async () => {
     try {
-      console.log('🎤 Solicitando micrófono...')
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
-          sampleRate: 48000,
-          volume: 1.0
+          sampleRate: 48000
         },
         video: false
       })
       
       localStreamRef.current = stream
-      console.log('✅ Micrófono obtenido')
-      
       await enableMonitoring(stream)
-      
-      setAudioTest("✅ Micrófono + Monitor")
+      setAudioTest("✅ Micrófono OK")
       addMessage("Sistema", "🎤 Micrófono conectado")
       return true
     } catch (error) {
-      console.error('❌ Error al acceder al micrófono:', error)
-      setAudioTest("❌ Error: No se pudo acceder al micrófono")
+      console.error('Error:', error)
+      setAudioTest("❌ Error micrófono")
       addMessage("Sistema", "❌ No se pudo acceder al micrófono")
       return false
     }
   }
 
-  // ✅ MONITORIZACIÓN CON GANANCIA EXTRA
   const enableMonitoring = async (stream: MediaStream) => {
     try {
       if (audioContextRef.current) {
@@ -120,32 +113,26 @@ export default function JamWebPage() {
       
       const source = ctx.createMediaStreamSource(stream)
       
-      // ✅ Ganancia controlada por el usuario (0-2)
       const gain = ctx.createGain()
       gain.gain.value = monitorVolume
       monitorGainRef.current = gain
       
-      // ✅ Ganancia extra fija (x2) para subir el volumen
       const boost = ctx.createGain()
       boost.gain.value = 2.0
       monitorBoostRef.current = boost
       
-      // ✅ Conectar: micrófono → gain → boost → salida
       source.connect(gain)
       gain.connect(boost)
       boost.connect(ctx.destination)
       
       setIsMonitoring(true)
-      
-      console.log(`✅ Monitorización: gain=${monitorVolume}, boost=2.0`)
-      addMessage("Sistema", "🔊 Monitorización activada (volumen amplificado x2)")
+      addMessage("Sistema", "🔊 Monitorización activada")
       
       if (ctx.state === 'suspended') {
         await ctx.resume()
       }
-      
     } catch (error) {
-      console.error('❌ Error en monitorización:', error)
+      console.error('Error en monitorización:', error)
       addMessage("Sistema", "⚠️ Error en monitorización")
     }
   }
@@ -158,11 +145,10 @@ export default function JamWebPage() {
         monitorGainRef.current = null
         monitorBoostRef.current = null
         setIsMonitoring(false)
-        console.log('🔇 Monitorización desactivada')
         addMessage("Sistema", "🔇 Monitorización desactivada")
       }
     } catch (error) {
-      console.error('❌ Error al desactivar monitorización:', error)
+      console.error('Error:', error)
     }
   }
 
@@ -184,29 +170,23 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ CREAR CONEXIÓN PEER
   const createPeerConnection = (targetId: string) => {
-    console.log(`🔗 Creando conexión con ${targetId}`)
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!)
-        console.log(`📤 Track añadido: ${track.kind}`)
       })
     }
 
     pc.ontrack = (event) => {
-      console.log(`📥 Audio remoto recibido de ${targetId}`)
-      
       const audioEl = new Audio()
       audioEl.autoplay = true
       audioEl.volume = 1.0
       audioEl.srcObject = event.streams[0]
-      audioEl.play().catch(e => console.log('⚠️ Error playing remote audio:', e))
-      
-      addMessage("Sistema", `🔊 Audio recibido de otro músico`)
+      audioEl.play().catch(e => console.log('Error:', e))
+      addMessage("Sistema", "🔊 Audio recibido")
     }
 
     pc.onicecandidate = (event) => {
@@ -224,9 +204,8 @@ export default function JamWebPage() {
     }
 
     pc.onconnectionstatechange = () => {
-      console.log(`🔗 Estado de conexión con ${targetId}: ${pc.connectionState}`)
       if (pc.connectionState === 'connected') {
-        addMessage("Sistema", `🔗 Conectado con otro músico`)
+        addMessage("Sistema", "🔗 Conectado con otro músico")
       }
     }
 
@@ -235,7 +214,6 @@ export default function JamWebPage() {
 
   const createOffer = async (targetId: string) => {
     try {
-      console.log(`📤 Creando oferta para ${targetId}`)
       const pc = createPeerConnection(targetId)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
@@ -252,13 +230,12 @@ export default function JamWebPage() {
         })
       }
     } catch (error) {
-      console.error('❌ Error creating offer:', error)
+      console.error('Error:', error)
     }
   }
 
   const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
     try {
-      console.log(`📥 Oferta recibida de ${fromId}`)
       const pc = createPeerConnection(fromId)
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
       
@@ -277,7 +254,7 @@ export default function JamWebPage() {
         })
       }
     } catch (error) {
-      console.error('❌ Error handling offer:', error)
+      console.error('Error:', error)
     }
   }
 
@@ -288,7 +265,7 @@ export default function JamWebPage() {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
       }
     } catch (error) {
-      console.error('❌ Error handling answer:', error)
+      console.error('Error:', error)
     }
   }
 
@@ -299,7 +276,7 @@ export default function JamWebPage() {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
       }
     } catch (error) {
-      console.error('❌ Error adding ICE candidate:', error)
+      console.error('Error:', error)
     }
   }
 
@@ -314,7 +291,7 @@ export default function JamWebPage() {
 
   const createRoom = async (category: CategoryKey) => {
     if (!selectedInstrument) {
-      addMessage("Sistema", "⚠️ Selecciona un instrumento primero")
+      addMessage("Sistema", "⚠️ Selecciona un instrumento")
       return
     }
 
@@ -323,14 +300,12 @@ export default function JamWebPage() {
     setIsOwner(true)
     setSelectedCategory(category)
     setRoomCategory(category)
-    
     userIdRef.current = user?.id || `local-${Date.now()}`
     
     const ok = await startLocalStream()
     if (!ok) return
     
     setIsInRoom(true)
-    
     setParticipants([{ 
       id: userIdRef.current, 
       name: myName || user?.email || 'Anónimo',
@@ -338,17 +313,17 @@ export default function JamWebPage() {
       isOwner: true
     }])
     
-    addMessage("Sistema", `👑 ${myName} ha creado la sala ${newRoomId}`)
+    addMessage("Sistema", `👑 ${myName} creó la sala ${newRoomId}`)
     subscribeToRoom(newRoomId, category)
   }
 
   const joinRoom = async () => {
     if (!roomId.trim()) {
-      addMessage("Sistema", "⚠️ Introduce un código de sala")
+      addMessage("Sistema", "⚠️ Introduce código de sala")
       return
     }
     if (!selectedInstrument) {
-      addMessage("Sistema", "⚠️ Selecciona un instrumento primero")
+      addMessage("Sistema", "⚠️ Selecciona un instrumento")
       return
     }
 
@@ -365,7 +340,7 @@ export default function JamWebPage() {
       instrument: selectedInstrument,
       isOwner: false
     }])
-    addMessage("Sistema", `🎵 ${myName} se ha unido a la sala ${roomId}`)
+    addMessage("Sistema", `🎵 ${myName} se unió a ${roomId}`)
     subscribeToRoom(roomId, selectedCategory || 'moderna')
   }
 
@@ -374,13 +349,12 @@ export default function JamWebPage() {
       channelRef.current.unsubscribe()
     }
 
-    console.log(`📡 Suscribiéndose al canal: jam:${roomId}`)
     const channel = supabase.channel(`jam:${roomId}`)
     channelRef.current = channel
 
     channel
       .on('broadcast', { event: 'user-joined' }, ({ payload }) => {
-        addMessage("Sistema", `👤 ${payload.name} (${payload.instrument}) se ha unido`)
+        addMessage("Sistema", `👤 ${payload.name} (${payload.instrument}) se unió`)
         setParticipants(prev => {
           if (!prev.find(p => p.id === payload.id)) {
             return [...prev, { 
@@ -392,7 +366,6 @@ export default function JamWebPage() {
           }
           return prev
         })
-        
         setTimeout(() => {
           if (payload.id !== userIdRef.current) {
             createOffer(payload.id)
@@ -400,9 +373,8 @@ export default function JamWebPage() {
         }, 1000)
       })
       .on('broadcast', { event: 'user-left' }, ({ payload }) => {
-        addMessage("Sistema", `👤 ${payload.name} ha salido`)
+        addMessage("Sistema", `👤 ${payload.name} salió`)
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
-        
         const pc = peerConnectionsRef.current.get(payload.id)
         if (pc) { pc.close(); peerConnectionsRef.current.delete(payload.id) }
       })
@@ -422,7 +394,6 @@ export default function JamWebPage() {
         }
       })
       .subscribe((status) => {
-        console.log(`📡 Estado del canal: ${status}`)
         if (status === 'SUBSCRIBED') {
           channel.send({
             type: 'broadcast',
@@ -434,10 +405,7 @@ export default function JamWebPage() {
               isOwner: isOwner
             }
           })
-          
-          setTimeout(() => {
-            connectToAll()
-          }, 1500)
+          setTimeout(() => connectToAll(), 1500)
         }
       })
   }
@@ -472,7 +440,6 @@ export default function JamWebPage() {
     
     peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
-    
     await disableMonitoring()
     
     if (localStreamRef.current) {
@@ -567,24 +534,14 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>👑 Dueño</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
-          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor (x2)</span>}
+          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor</span>}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMuted ? "🔇" : "🎤"}</button>
-          <button onClick={toggleMonitoring} style={{ padding: "4px 12px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
-            {isMonitoring ? "🔊 Monitor" : "🔇 Monitor"}
-          </button>
+          <button onClick={toggleMonitoring} style={{ padding: "4px 12px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMonitoring ? "🔊 Monitor" : "🔇 Monitor"}</button>
           {isMonitoring && (
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.01"
-                value={monitorVolume}
-                onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))}
-                style={{ width: 80, accentColor: "#10b981" }}
-              />
+              <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: "#10b981" }} />
               <span style={{ fontSize: 10, color: "#6b7280", minWidth: 35 }}>{Math.round(monitorVolume * 100)}%</span>
             </div>
           )}
