@@ -54,6 +54,7 @@ export default function JamWebPage() {
   const [audioTest, setAudioTest] = useState<string>("")
   const [isMonitoring, setIsMonitoring] = useState(false)
   const [monitorVolume, setMonitorVolume] = useState(1.5)
+  const [audioQuality, setAudioQuality] = useState<'low' | 'medium' | 'high'>('high')
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -61,11 +62,13 @@ export default function JamWebPage() {
   const userIdRef = useRef<string>("")
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null)
 
   const PEER_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   }
 
@@ -75,23 +78,55 @@ export default function JamWebPage() {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
-  // ============ AUDIO ============
+  // ============ AUDIO MEJORADO ============
+  const getAudioConstraints = () => {
+    const baseConstraints: any = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    }
+
+    switch (audioQuality) {
+      case 'high':
+        return {
+          ...baseConstraints,
+          sampleRate: 48000,
+          channelCount: 2,
+          latency: 0.01
+        }
+      case 'medium':
+        return {
+          ...baseConstraints,
+          sampleRate: 44100,
+          channelCount: 1,
+          latency: 0.02
+        }
+      case 'low':
+        return {
+          ...baseConstraints,
+          sampleRate: 16000,
+          channelCount: 1,
+          latency: 0.05
+        }
+    }
+  }
+
   const startLocalStream = async () => {
     try {
+      console.log('🎤 Solicitando micrófono con calidad:', audioQuality)
+      
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 48000
-        },
+        audio: getAudioConstraints(),
         video: false
       })
       
       localStreamRef.current = stream
-      await enableMonitoring(stream)
-      setAudioTest("✅ Micrófono OK")
-      addMessage("Sistema", "🎤 Micrófono conectado")
+      
+      // ✅ Aplicar compresión y ecualización
+      await enableEnhancedMonitoring(stream)
+      
+      setAudioTest(`✅ Micrófono OK (${audioQuality})`)
+      addMessage("Sistema", `🎤 Micrófono conectado (calidad ${audioQuality})`)
       return true
     } catch (error) {
       console.error('Error:', error)
@@ -101,27 +136,50 @@ export default function JamWebPage() {
     }
   }
 
-  const enableMonitoring = async (stream: MediaStream) => {
+  // ✅ MONITORIZACIÓN CON COMPRESOR Y EQ
+  const enableEnhancedMonitoring = async (stream: MediaStream) => {
     try {
       if (audioContextRef.current) {
         await audioContextRef.current.close()
         audioContextRef.current = null
       }
       
-      const ctx = new AudioContext()
+      const ctx = new AudioContext({
+        sampleRate: 48000,
+        latencyHint: 'interactive'
+      })
       audioContextRef.current = ctx
       
       const source = ctx.createMediaStreamSource(stream)
       
+      // ✅ COMPRESOR - mejora el sonido y sube el volumen
+      const compressor = ctx.createDynamicsCompressor()
+      compressor.threshold.value = -24
+      compressor.knee.value = 30
+      compressor.ratio.value = 12
+      compressor.attack.value = 0.003
+      compressor.release.value = 0.25
+      compressorRef.current = compressor
+      
+      // ✅ GANANCIA PRINCIPAL
       const gain = ctx.createGain()
       gain.gain.value = monitorVolume
       monitorGainRef.current = gain
       
-      // Boost extra
+      // ✅ BOOST EXTRA
       const boost = ctx.createGain()
-      boost.gain.value = 2.0
+      boost.gain.value = 1.8
       
-      source.connect(gain)
+      // ✅ EQ: ecualizador simple (bass boost)
+      const bassBoost = ctx.createBiquadFilter()
+      bassBoost.type = 'lowshelf'
+      bassBoost.frequency.value = 200
+      bassBoost.gain.value = 6
+      
+      // ✅ Conectar: source → EQ → compressor → gain → boost → destination
+      source.connect(bassBoost)
+      bassBoost.connect(compressor)
+      compressor.connect(gain)
       gain.connect(boost)
       boost.connect(ctx.destination)
       
@@ -130,6 +188,9 @@ export default function JamWebPage() {
       if (ctx.state === 'suspended') {
         await ctx.resume()
       }
+      
+      addMessage("Sistema", "🔊 Monitorización mejorada (compresión + EQ)")
+      
     } catch (error) {
       console.error('Error en monitorización:', error)
     }
@@ -141,6 +202,7 @@ export default function JamWebPage() {
         await audioContextRef.current.close()
         audioContextRef.current = null
         monitorGainRef.current = null
+        compressorRef.current = null
         setIsMonitoring(false)
       }
     } catch (error) {
@@ -161,12 +223,12 @@ export default function JamWebPage() {
       await disableMonitoring()
     } else {
       if (localStreamRef.current) {
-        await enableMonitoring(localStreamRef.current)
+        await enableEnhancedMonitoring(localStreamRef.current)
       }
     }
   }
 
-  // ============ WEBRTC ============
+  // ============ WEBRTC CON MEJOR CALIDAD ============
   const createPeerConnection = (targetId: string) => {
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
@@ -212,7 +274,10 @@ export default function JamWebPage() {
   const createOffer = async (targetId: string) => {
     try {
       const pc = createPeerConnection(targetId)
-      const offer = await pc.createOffer()
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false
+      })
       await pc.setLocalDescription(offer)
       
       if (channelRef.current) {
@@ -457,7 +522,7 @@ export default function JamWebPage() {
     setAudioTest("")
   }
 
-  // ============ UI SIMPLE ============
+  // ============ UI ============
   if (!user) {
     return (
       <div style={{ padding: 40, color: "white", textAlign: "center" }}>
@@ -511,6 +576,32 @@ export default function JamWebPage() {
               </div>
             </div>
           )}
+          
+          {/* ✅ Selector de calidad de audio */}
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ color: "#9ca3af", marginBottom: 8, fontWeight: "bold", fontSize: 14 }}>🎚️ Calidad de audio:</p>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {['low', 'medium', 'high'].map((q) => (
+                <button
+                  key={q}
+                  onClick={() => setAudioQuality(q as any)}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    background: audioQuality === q ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
+                    color: audioQuality === q ? "#10b981" : "#6b7280",
+                    border: audioQuality === q ? "2px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: audioQuality === q ? "bold" : "normal"
+                  }}
+                >
+                  {q === 'low' ? '📱 Baja' : q === 'medium' ? '📀 Media' : '💿 Alta'}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <button onClick={() => { if (selectedCategory && selectedInstrument) createRoom(selectedCategory) }} disabled={!selectedCategory || !selectedInstrument} style={{ width: "100%", padding: "14px", background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed" }}>🎸 Crear sala</button>
@@ -535,6 +626,7 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
+          <span style={{ marginLeft: 12, fontSize: 11, color: "#6b7280" }}>🎚️ {audioQuality}</span>
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
@@ -586,7 +678,7 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId}</strong></div>
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId}</strong> · 🎚️ {audioQuality}</div>
     </div>
   )
 }
