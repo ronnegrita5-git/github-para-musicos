@@ -7,17 +7,17 @@ import { supabase } from "@/lib/supabase"
 
 const CATEGORIES = {
   'viento': {
-    name: '🎷 Banda de Viento',
+    name: '🎷 Viento',
     emoji: '🎷',
     instruments: ['Trompeta', 'Saxofón', 'Trombón', 'Clarinete', 'Flauta', 'Tuba']
   },
   'cuerda': {
-    name: '🎻 Orquesta de Cámara',
+    name: '🎻 Cuerda',
     emoji: '🎻',
     instruments: ['Violín', 'Viola', 'Violonchelo', 'Contrabajo', 'Arpa', 'Piano']
   },
   'moderna': {
-    name: '🎸 Banda de Rock',
+    name: '🎸 Rock',
     emoji: '🎸',
     instruments: ['Guitarra', 'Bajo', 'Batería', 'Teclado', 'Voz', 'Sintetizador']
   }
@@ -53,7 +53,7 @@ export default function JamWebPage() {
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
   const [isMonitoring, setIsMonitoring] = useState(false)
-  const [monitorVolume, setMonitorVolume] = useState(3.0)
+  const [monitorVolume, setMonitorVolume] = useState(1.5)
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -61,8 +61,6 @@ export default function JamWebPage() {
   const userIdRef = useRef<string>("")
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
-  const monitorBoostRef = useRef<GainNode | null>(null)
-  const monitorBoost2Ref = useRef<GainNode | null>(null)
 
   const PEER_CONFIG = {
     iceServers: [
@@ -77,13 +75,14 @@ export default function JamWebPage() {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
+  // ============ AUDIO ============
   const startLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
           sampleRate: 48000
         },
         video: false
@@ -102,7 +101,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ MONITORIZACIÓN CON GANANCIA EXTREMA (x4)
   const enableMonitoring = async (stream: MediaStream) => {
     try {
       if (audioContextRef.current) {
@@ -115,37 +113,25 @@ export default function JamWebPage() {
       
       const source = ctx.createMediaStreamSource(stream)
       
-      // ✅ Ganancia controlada por el usuario (0-3)
       const gain = ctx.createGain()
       gain.gain.value = monitorVolume
       monitorGainRef.current = gain
       
-      // ✅ Ganancia extra x2
+      // Boost extra
       const boost = ctx.createGain()
       boost.gain.value = 2.0
-      monitorBoostRef.current = boost
       
-      // ✅ Segunda ganancia extra x2 (total x4)
-      const boost2 = ctx.createGain()
-      boost2.gain.value = 2.0
-      monitorBoost2Ref.current = boost2
-      
-      // ✅ Conectar: micrófono → gain → boost → boost2 → salida
       source.connect(gain)
       gain.connect(boost)
-      boost.connect(boost2)
-      boost2.connect(ctx.destination)
+      boost.connect(ctx.destination)
       
       setIsMonitoring(true)
-      
-      addMessage("Sistema", "🔊 Monitorización activada (volumen x4)")
       
       if (ctx.state === 'suspended') {
         await ctx.resume()
       }
     } catch (error) {
       console.error('Error en monitorización:', error)
-      addMessage("Sistema", "⚠️ Error en monitorización")
     }
   }
 
@@ -155,10 +141,7 @@ export default function JamWebPage() {
         await audioContextRef.current.close()
         audioContextRef.current = null
         monitorGainRef.current = null
-        monitorBoostRef.current = null
-        monitorBoost2Ref.current = null
         setIsMonitoring(false)
-        addMessage("Sistema", "🔇 Monitorización desactivada")
       }
     } catch (error) {
       console.error('Error:', error)
@@ -166,7 +149,7 @@ export default function JamWebPage() {
   }
 
   const updateMonitorVolume = (value: number) => {
-    const newVolume = Math.max(0, Math.min(3, value))
+    const newVolume = Math.max(0, Math.min(2, value))
     setMonitorVolume(newVolume)
     if (monitorGainRef.current) {
       monitorGainRef.current.gain.value = newVolume
@@ -183,6 +166,7 @@ export default function JamWebPage() {
     }
   }
 
+  // ============ WEBRTC ============
   const createPeerConnection = (targetId: string) => {
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
@@ -302,6 +286,7 @@ export default function JamWebPage() {
     }
   }
 
+  // ============ SALA ============
   const createRoom = async (category: CategoryKey) => {
     if (!selectedInstrument) {
       addMessage("Sistema", "⚠️ Selecciona un instrumento")
@@ -472,6 +457,7 @@ export default function JamWebPage() {
     setAudioTest("")
   }
 
+  // ============ UI SIMPLE ============
   if (!user) {
     return (
       <div style={{ padding: 40, color: "white", textAlign: "center" }}>
@@ -497,7 +483,7 @@ export default function JamWebPage() {
   if (!isInRoom) {
     return (
       <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-        <div style={{ maxWidth: 600, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
+        <div style={{ maxWidth: 500, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
           <h1 style={{ fontSize: 48, textAlign: "center", marginBottom: 8 }}>🎵</h1>
           <h2 style={{ textAlign: "center", marginBottom: 24 }}>Jam Session</h2>
           
@@ -505,7 +491,7 @@ export default function JamWebPage() {
             <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎯 Elige el tipo de Jam:</p>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {Object.entries(CATEGORIES).map(([key, cat]) => (
-                <button key={key} onClick={() => { setSelectedCategory(key as CategoryKey); setSelectedInstrument("") }} style={{ flex: 1, minWidth: "120px", padding: "12px 16px", background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedCategory === key ? "#10b981" : "#9ca3af", border: selectedCategory === key ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", textAlign: "center" }}>
+                <button key={key} onClick={() => { setSelectedCategory(key as CategoryKey); setSelectedInstrument("") }} style={{ flex: 1, minWidth: "100px", padding: "12px", background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedCategory === key ? "#10b981" : "#9ca3af", border: selectedCategory === key ? "2px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", textAlign: "center" }}>
                   <div style={{ fontSize: 28 }}>{cat.emoji}</div>
                   <div style={{ fontSize: 13 }}>{cat.name}</div>
                 </button>
@@ -518,7 +504,7 @@ export default function JamWebPage() {
               <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎸 Elige tu instrumento:</p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {CATEGORIES[selectedCategory].instruments.map((inst) => (
-                  <button key={inst} onClick={() => setSelectedInstrument(inst)} style={{ padding: "8px 16px", background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedInstrument === inst ? "#10b981" : "#9ca3af", border: selectedInstrument === inst ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+                  <button key={inst} onClick={() => setSelectedInstrument(inst)} style={{ padding: "8px 16px", background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedInstrument === inst ? "#10b981" : "#9ca3af", border: selectedInstrument === inst ? "2px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
                     {getInstrumentEmoji(inst)} {inst}
                   </button>
                 ))}
@@ -538,67 +524,69 @@ export default function JamWebPage() {
     )
   }
 
+  // ============ SALA ACTIVA ============
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "16px", maxWidth: "800px", margin: "0 auto" }}>
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", flexWrap: "wrap", gap: "8px" }}>
         <div>
-          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 Sala: {roomId}</span>
-          <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 14 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
-          <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>👥 {participants.length}</span>
-          {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>👑 Dueño</span>}
+          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 {roomId}</span>
+          <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
+          <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
+          {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
-          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor x4</span>}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMuted ? "🔇" : "🎤"}</button>
-          <button onClick={toggleMonitoring} style={{ padding: "4px 12px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMonitoring ? "🔊 Monitor" : "🔇 Monitor"}</button>
+          <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
+          <button onClick={toggleMonitoring} style={{ padding: "6px 14px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMonitoring ? "🔊" : "🔇"}</button>
           {isMonitoring && (
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <input type="range" min="0" max="3" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: "#10b981" }} />
-              <span style={{ fontSize: 10, color: "#6b7280", minWidth: 35 }}>{Math.round((monitorVolume / 3) * 100)}%</span>
+              <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: "#10b981" }} />
+              <span style={{ fontSize: 11, color: "#6b7280", minWidth: 30 }}>{Math.round((monitorVolume / 2) * 100)}%</span>
             </div>
           )}
-          <button onClick={leaveRoom} style={{ padding: "4px 12px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>✕ Salir</button>
+          <button onClick={leaveRoom} style={{ padding: "6px 14px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>✕</button>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", flex: 1 }}>
-        <div>
-          <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "16px", border: "1px solid rgba(255,255,255,0.05)", minHeight: "200px" }}>
-            <h3 style={{ margin: "0 0 12px 0", color: "#9ca3af", fontSize: 14 }}>🎵 Participantes</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {participants.map((p) => (
-                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "8px 12px", background: p.id === userIdRef.current ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", borderRadius: 6, border: p.id === userIdRef.current ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)" }}>
-                  <span style={{ fontSize: 24 }}>{getInstrumentEmoji(p.instrument)}</span>
-                  <div style={{ flex: 1 }}><div style={{ fontWeight: p.id === userIdRef.current ? "bold" : "normal", color: "white" }}>{p.name} {p.id === userIdRef.current && "(tú)"}{p.isOwner && " 👑"}</div><div style={{ fontSize: 12, color: "#6b7280" }}>{p.instrument}</div></div>
-                  {p.id !== userIdRef.current && <span style={{ fontSize: 11, color: peerConnectionsRef.current.has(p.id) ? "#10b981" : "#fbbf24" }}>{peerConnectionsRef.current.has(p.id) ? "🔗 Conectado" : "⏳ Conectando..."}</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div style={{ marginTop: "12px", padding: "12px 16px", background: "rgba(16,185,129,0.05)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-            <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>🎧 <strong>Usa cascos</strong> para evitar feedback.</p>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", height: "400px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden" }}>
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={{ color: "#9ca3af", fontWeight: "bold" }}>💬 Chat</span><span style={{ fontSize: 11, color: "#6b7280" }}>{participants.length} conectados</span></div>
-          <div style={{ flex: 1, padding: "12px 16px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "4px" }}>
-            {messages.map((msg) => (
-              <div key={msg.id} style={{ padding: "4px 12px", background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)", borderRadius: 6, fontSize: 14 }}>
-                <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>{msg.user === "Sistema" ? "📢 " : msg.user}:</span>
-                <span style={{ color: "white", marginLeft: 4 }}>{msg.text}</span>
+      {/* Participantes */}
+      <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "12px", border: "1px solid rgba(255,255,255,0.05)", marginBottom: "12px" }}>
+        <h3 style={{ margin: "0 0 8px 0", color: "#9ca3af", fontSize: 14 }}>🎵 Participantes</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          {participants.map((p) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 10px", background: p.id === userIdRef.current ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", borderRadius: 6, border: p.id === userIdRef.current ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)" }}>
+              <span style={{ fontSize: 20 }}>{getInstrumentEmoji(p.instrument)}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: p.id === userIdRef.current ? "bold" : "normal", color: "white", fontSize: 13 }}>{p.name} {p.id === userIdRef.current && "(tú)"}{p.isOwner && " 👑"}</div>
+                <div style={{ fontSize: 11, color: "#6b7280" }}>{p.instrument}</div>
               </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.05)", gap: "8px" }}>
-            <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} onKeyPress={(e) => e.key === "Enter" && sendMessage()} placeholder="Escribe un mensaje..." style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 14 }} />
-            <button onClick={sendMessage} style={{ padding: "8px 16px", background: "#10b981", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: "bold" }}>Enviar</button>
-          </div>
+              {p.id !== userIdRef.current && <span style={{ fontSize: 12, color: peerConnectionsRef.current.has(p.id) ? "#10b981" : "#fbbf24" }}>{peerConnectionsRef.current.has(p.id) ? "🔗" : "⏳"}</span>}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Comparte el código <strong>{roomId}</strong> con otros músicos</div>
+      {/* Chat */}
+      <div style={{ display: "flex", flexDirection: "column", height: "300px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden" }}>
+        <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ color: "#9ca3af", fontWeight: "bold" }}>💬 Chat</span>
+          <span style={{ fontSize: 12, color: "#6b7280" }}>{participants.length} conectados</span>
+        </div>
+        <div style={{ flex: 1, padding: "8px 12px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "4px" }}>
+          {messages.slice(-50).map((msg) => (
+            <div key={msg.id} style={{ padding: "4px 10px", background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)", borderRadius: 6, fontSize: 13 }}>
+              <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>{msg.user === "Sistema" ? "📢 " : msg.user}:</span>
+              <span style={{ color: "white", marginLeft: 4 }}>{msg.text}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.05)", gap: "8px" }}>
+          <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} onKeyPress={(e) => e.key === "Enter" && sendMessage()} placeholder="Mensaje..." style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 14 }} />
+          <button onClick={sendMessage} style={{ padding: "8px 16px", background: "#10b981", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: "bold" }}>Enviar</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId}</strong></div>
     </div>
   )
 }
