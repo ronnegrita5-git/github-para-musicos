@@ -53,7 +53,7 @@ export default function JamWebPage() {
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
   const [isMonitoring, setIsMonitoring] = useState(false)
-  const [monitorVolume, setMonitorVolume] = useState(1.5)
+  const [monitorVolume, setMonitorVolume] = useState(3.0)
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -62,6 +62,7 @@ export default function JamWebPage() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
   const monitorBoostRef = useRef<GainNode | null>(null)
+  const monitorBoost2Ref = useRef<GainNode | null>(null)
 
   const PEER_CONFIG = {
     iceServers: [
@@ -101,6 +102,7 @@ export default function JamWebPage() {
     }
   }
 
+  // ✅ MONITORIZACIÓN CON GANANCIA EXTREMA (x4)
   const enableMonitoring = async (stream: MediaStream) => {
     try {
       if (audioContextRef.current) {
@@ -113,20 +115,30 @@ export default function JamWebPage() {
       
       const source = ctx.createMediaStreamSource(stream)
       
+      // ✅ Ganancia controlada por el usuario (0-3)
       const gain = ctx.createGain()
       gain.gain.value = monitorVolume
       monitorGainRef.current = gain
       
+      // ✅ Ganancia extra x2
       const boost = ctx.createGain()
       boost.gain.value = 2.0
       monitorBoostRef.current = boost
       
+      // ✅ Segunda ganancia extra x2 (total x4)
+      const boost2 = ctx.createGain()
+      boost2.gain.value = 2.0
+      monitorBoost2Ref.current = boost2
+      
+      // ✅ Conectar: micrófono → gain → boost → boost2 → salida
       source.connect(gain)
       gain.connect(boost)
-      boost.connect(ctx.destination)
+      boost.connect(boost2)
+      boost2.connect(ctx.destination)
       
       setIsMonitoring(true)
-      addMessage("Sistema", "🔊 Monitorización activada")
+      
+      addMessage("Sistema", "🔊 Monitorización activada (volumen x4)")
       
       if (ctx.state === 'suspended') {
         await ctx.resume()
@@ -144,6 +156,7 @@ export default function JamWebPage() {
         audioContextRef.current = null
         monitorGainRef.current = null
         monitorBoostRef.current = null
+        monitorBoost2Ref.current = null
         setIsMonitoring(false)
         addMessage("Sistema", "🔇 Monitorización desactivada")
       }
@@ -153,7 +166,7 @@ export default function JamWebPage() {
   }
 
   const updateMonitorVolume = (value: number) => {
-    const newVolume = Math.max(0, Math.min(2, value))
+    const newVolume = Math.max(0, Math.min(3, value))
     setMonitorVolume(newVolume)
     if (monitorGainRef.current) {
       monitorGainRef.current.gain.value = newVolume
@@ -534,15 +547,15 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>👑 Dueño</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
-          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor</span>}
+          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor x4</span>}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMuted ? "🔇" : "🎤"}</button>
           <button onClick={toggleMonitoring} style={{ padding: "4px 12px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMonitoring ? "🔊 Monitor" : "🔇 Monitor"}</button>
           {isMonitoring && (
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: "#10b981" }} />
-              <span style={{ fontSize: 10, color: "#6b7280", minWidth: 35 }}>{Math.round(monitorVolume * 100)}%</span>
+              <input type="range" min="0" max="3" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: "#10b981" }} />
+              <span style={{ fontSize: 10, color: "#6b7280", minWidth: 35 }}>{Math.round((monitorVolume / 3) * 100)}%</span>
             </div>
           )}
           <button onClick={leaveRoom} style={{ padding: "4px 12px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>✕ Salir</button>
