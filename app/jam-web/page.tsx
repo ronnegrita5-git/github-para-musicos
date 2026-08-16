@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useAuth } from "../context/AuthContext"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
@@ -37,6 +37,226 @@ const getInstrumentEmoji = (instrument: string) => {
   return emojis[instrument] || '🎵'
 }
 
+// ✅ COMPONENTE DE EFECTOS DE AUDIO
+function AudioEffects({ stream }: { stream: MediaStream | null }) {
+  const [compressor, setCompressor] = useState({
+    threshold: -24,
+    ratio: 12,
+    attack: 0.003,
+    release: 0.25,
+    gain: 6
+  })
+  
+  const [eq, setEq] = useState({
+    bass: 6,
+    mid: 0,
+    treble: 3
+  })
+  
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const compressorRef = useRef<any>(null)
+  const eqRefs = useRef<any[]>([])
+  const isConnectedRef = useRef(false)
+
+  useEffect(() => {
+    if (!stream) return
+    
+    const setupAudio = async () => {
+      try {
+        // Cerrar contexto anterior si existe
+        if (audioContextRef.current) {
+          await audioContextRef.current.close()
+          audioContextRef.current = null
+          isConnectedRef.current = false
+        }
+        
+        const ctx = new AudioContext()
+        audioContextRef.current = ctx
+        
+        const source = ctx.createMediaStreamSource(stream)
+        
+        // ✅ COMPRESOR
+        const comp = ctx.createDynamicsCompressor()
+        comp.threshold.value = compressor.threshold
+        comp.ratio.value = compressor.ratio
+        comp.attack.value = compressor.attack
+        comp.release.value = compressor.release
+        compressorRef.current = comp
+        
+        // ✅ EQ: Bass (lowshelf)
+        const bass = ctx.createBiquadFilter()
+        bass.type = 'lowshelf'
+        bass.frequency.value = 200
+        bass.gain.value = eq.bass
+        
+        // ✅ EQ: Mid (peaking)
+        const mid = ctx.createBiquadFilter()
+        mid.type = 'peaking'
+        mid.frequency.value = 1000
+        mid.Q.value = 1
+        mid.gain.value = eq.mid
+        
+        // ✅ EQ: Treble (highshelf)
+        const treble = ctx.createBiquadFilter()
+        treble.type = 'highshelf'
+        treble.frequency.value = 5000
+        treble.gain.value = eq.treble
+        
+        eqRefs.current = [bass, mid, treble]
+        
+        // ✅ Conectar: source → EQ → compressor → destination
+        source.connect(bass)
+        bass.connect(mid)
+        mid.connect(treble)
+        treble.connect(comp)
+        comp.connect(ctx.destination)
+        
+        isConnectedRef.current = true
+        
+        if (ctx.state === 'suspended') {
+          await ctx.resume()
+        }
+        
+        console.log('🎛️ Efectos de audio activados')
+      } catch (error) {
+        console.error('Error al configurar efectos:', error)
+      }
+    }
+    
+    setupAudio()
+    
+    return () => {
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+        audioContextRef.current = null
+        isConnectedRef.current = false
+      }
+    }
+  }, [stream])
+
+  // ✅ Actualizar compresor en tiempo real
+  useEffect(() => {
+    if (compressorRef.current && isConnectedRef.current) {
+      compressorRef.current.threshold.value = compressor.threshold
+      compressorRef.current.ratio.value = compressor.ratio
+      compressorRef.current.attack.value = compressor.attack
+      compressorRef.current.release.value = compressor.release
+    }
+  }, [compressor])
+
+  // ✅ Actualizar EQ en tiempo real
+  useEffect(() => {
+    if (eqRefs.current.length === 3 && isConnectedRef.current) {
+      eqRefs.current[0].gain.value = eq.bass
+      eqRefs.current[1].gain.value = eq.mid
+      eqRefs.current[2].gain.value = eq.treble
+    }
+  }, [eq])
+
+  if (!stream) return null
+
+  return (
+    <div style={{
+      padding: '12px',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: 8,
+      border: '1px solid rgba(255,255,255,0.05)',
+      marginTop: '8px'
+    }}>
+      <h4 style={{ margin: '0 0 8px 0', color: '#10b981', fontSize: 13 }}>
+        🎛️ Efectos de Audio
+      </h4>
+      
+      {/* EQ */}
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
+        <div style={{ flex: 1, minWidth: '80px' }}>
+          <label style={{ fontSize: 11, color: '#6b7280' }}>🔊 Bass</label>
+          <input
+            type="range"
+            min="-12"
+            max="12"
+            step="1"
+            value={eq.bass}
+            onChange={(e) => setEq(prev => ({ ...prev, bass: Number(e.target.value) }))}
+            style={{ width: '100%', accentColor: '#10b981' }}
+          />
+          <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.bass}dB</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '80px' }}>
+          <label style={{ fontSize: 11, color: '#6b7280' }}>🎵 Mid</label>
+          <input
+            type="range"
+            min="-12"
+            max="12"
+            step="1"
+            value={eq.mid}
+            onChange={(e) => setEq(prev => ({ ...prev, mid: Number(e.target.value) }))}
+            style={{ width: '100%', accentColor: '#10b981' }}
+          />
+          <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.mid}dB</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '80px' }}>
+          <label style={{ fontSize: 11, color: '#6b7280' }}>🔊 Treble</label>
+          <input
+            type="range"
+            min="-12"
+            max="12"
+            step="1"
+            value={eq.treble}
+            onChange={(e) => setEq(prev => ({ ...prev, treble: Number(e.target.value) }))}
+            style={{ width: '100%', accentColor: '#10b981' }}
+          />
+          <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.treble}dB</span>
+        </div>
+      </div>
+      
+      {/* Compresor */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '60px' }}>
+          <label style={{ fontSize: 10, color: '#6b7280' }}>Threshold</label>
+          <input
+            type="range"
+            min="-40"
+            max="0"
+            step="1"
+            value={compressor.threshold}
+            onChange={(e) => setCompressor(prev => ({ ...prev, threshold: Number(e.target.value) }))}
+            style={{ width: '100%', accentColor: '#10b981' }}
+          />
+          <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.threshold}dB</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '60px' }}>
+          <label style={{ fontSize: 10, color: '#6b7280' }}>Ratio</label>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            step="0.5"
+            value={compressor.ratio}
+            onChange={(e) => setCompressor(prev => ({ ...prev, ratio: Number(e.target.value) }))}
+            style={{ width: '100%', accentColor: '#10b981' }}
+          />
+          <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.ratio}:1</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '60px' }}>
+          <label style={{ fontSize: 10, color: '#6b7280' }}>Gain</label>
+          <input
+            type="range"
+            min="0"
+            max="20"
+            step="1"
+            value={compressor.gain}
+            onChange={(e) => setCompressor(prev => ({ ...prev, gain: Number(e.target.value) }))}
+            style={{ width: '100%', accentColor: '#10b981' }}
+          />
+          <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.gain}dB</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============ COMPONENTE PRINCIPAL ============
 export default function JamWebPage() {
   const { user } = useAuth()
   const [roomId, setRoomId] = useState("")
@@ -52,11 +272,15 @@ export default function JamWebPage() {
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
+  const [isMonitoring, setIsMonitoring] = useState(false)
+  const [monitorVolume, setMonitorVolume] = useState(1.0)
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
   const userIdRef = useRef<string>("")
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const monitorGainRef = useRef<GainNode | null>(null)
 
   const PEER_CONFIG = {
     iceServers: [
@@ -71,20 +295,30 @@ export default function JamWebPage() {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
-  // ============ AUDIO SIMPLE ============
+  // ============ AUDIO CON EFECTOS ============
   const startLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          sampleRate: 48000
         },
         video: false
       })
       
       localStreamRef.current = stream
-      setAudioTest("✅ Micrófono OK")
+      
+      // ✅ Activar monitorización
+      await enableMonitoring(stream)
+      
+      const tracks = stream.getAudioTracks()
+      if (tracks.length > 0) {
+        const settings = tracks[0].getSettings()
+        setAudioTest(`✅ ${settings.sampleRate || 48}kHz`)
+      }
+      
       addMessage("Sistema", "🎤 Micrófono conectado")
       return true
     } catch (error) {
@@ -92,6 +326,69 @@ export default function JamWebPage() {
       setAudioTest("❌ Error")
       addMessage("Sistema", "❌ No se pudo acceder al micrófono")
       return false
+    }
+  }
+
+  // ✅ MONITORIZACIÓN CON GANANCIA
+  const enableMonitoring = async (stream: MediaStream) => {
+    try {
+      if (audioContextRef.current) {
+        await audioContextRef.current.close()
+        audioContextRef.current = null
+      }
+      
+      const ctx = new AudioContext()
+      audioContextRef.current = ctx
+      
+      const source = ctx.createMediaStreamSource(stream)
+      
+      const gain = ctx.createGain()
+      gain.gain.value = monitorVolume
+      monitorGainRef.current = gain
+      
+      source.connect(gain)
+      gain.connect(ctx.destination)
+      
+      setIsMonitoring(true)
+      
+      if (ctx.state === 'suspended') {
+        await ctx.resume()
+      }
+      
+      addMessage("Sistema", `🔊 Monitorización (${Math.round(monitorVolume * 100)}%)`)
+    } catch (error) {
+      console.error('Error en monitorización:', error)
+    }
+  }
+
+  const disableMonitoring = async () => {
+    try {
+      if (audioContextRef.current) {
+        await audioContextRef.current.close()
+        audioContextRef.current = null
+        monitorGainRef.current = null
+        setIsMonitoring(false)
+      }
+    } catch (error) {
+      console.error('Error:', error)
+    }
+  }
+
+  const updateMonitorVolume = (value: number) => {
+    const newVolume = Math.max(0, Math.min(2, value))
+    setMonitorVolume(newVolume)
+    if (monitorGainRef.current) {
+      monitorGainRef.current.gain.value = newVolume
+    }
+  }
+
+  const toggleMonitoring = async () => {
+    if (isMonitoring) {
+      await disableMonitoring()
+    } else {
+      if (localStreamRef.current) {
+        await enableMonitoring(localStreamRef.current)
+      }
     }
   }
 
@@ -354,7 +651,7 @@ export default function JamWebPage() {
     setInputMessage("")
   }
 
-  const leaveRoom = () => {
+  const leaveRoom = async () => {
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -367,6 +664,7 @@ export default function JamWebPage() {
     
     peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
+    await disableMonitoring()
     
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop())
@@ -463,9 +761,17 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
+          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 {Math.round(monitorVolume * 100)}%</span>}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
+          <button onClick={toggleMonitoring} style={{ padding: "6px 14px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMonitoring ? "🔊" : "🔇"}</button>
+          {isMonitoring && (
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 100, accentColor: "#10b981" }} />
+              <span style={{ fontSize: 11, color: "#6b7280", minWidth: 35 }}>{Math.round(monitorVolume * 100)}%</span>
+            </div>
+          )}
           <button onClick={leaveRoom} style={{ padding: "6px 14px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>✕</button>
         </div>
       </div>
@@ -487,8 +793,13 @@ export default function JamWebPage() {
         </div>
       </div>
 
+      {/* ✅ EFECTOS DE AUDIO */}
+      {localStreamRef.current && (
+        <AudioEffects stream={localStreamRef.current} />
+      )}
+
       {/* Chat */}
-      <div style={{ display: "flex", flexDirection: "column", height: "300px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "300px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden", marginTop: "8px" }}>
         <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ color: "#9ca3af", fontWeight: "bold" }}>💬 Chat</span>
           <span style={{ fontSize: 12, color: "#6b7280" }}>{participants.length} conectados</span>
