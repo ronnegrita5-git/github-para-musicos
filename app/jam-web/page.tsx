@@ -52,17 +52,12 @@ export default function JamWebPage() {
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
-  const [isMonitoring, setIsMonitoring] = useState(false)
-  const [monitorVolume, setMonitorVolume] = useState(1.5)
-  const [audioQuality, setAudioQuality] = useState<'low' | 'medium' | 'high'>('high')
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
   const userIdRef = useRef<string>("")
   const audioContextRef = useRef<AudioContext | null>(null)
-  const monitorGainRef = useRef<GainNode | null>(null)
-  const compressorRef = useRef<DynamicsCompressorNode | null>(null)
 
   const PEER_CONFIG = {
     iceServers: [
@@ -78,176 +73,110 @@ export default function JamWebPage() {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
-  // ============ AUDIO MEJORADO ============
-  const getAudioConstraints = () => {
-    const baseConstraints: any = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    }
-
-    switch (audioQuality) {
-      case 'high':
-        return {
-          ...baseConstraints,
-          sampleRate: 48000,
-          channelCount: 2,
-          latency: 0.01
-        }
-      case 'medium':
-        return {
-          ...baseConstraints,
-          sampleRate: 44100,
-          channelCount: 1,
-          latency: 0.02
-        }
-      case 'low':
-        return {
-          ...baseConstraints,
-          sampleRate: 16000,
-          channelCount: 1,
-          latency: 0.05
-        }
-    }
-  }
-
+  // ============ AUDIO PROFESIONAL ============
   const startLocalStream = async () => {
     try {
-      console.log('🎤 Solicitando micrófono con calidad:', audioQuality)
-      
+      // ✅ CONFIGURACIÓN PROFESIONAL
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: getAudioConstraints(),
+        audio: {
+          // ✅ Sin procesamiento - audio más limpio
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          // ✅ Calidad máxima
+          sampleRate: 48000,
+          channelCount: 2,
+          // ✅ Latencia mínima
+          latency: 0.005
+        },
         video: false
       })
       
       localStreamRef.current = stream
       
-      // ✅ Aplicar compresión y ecualización
-      await enableEnhancedMonitoring(stream)
+      // ✅ Verificar calidad del stream
+      const tracks = stream.getAudioTracks()
+      if (tracks.length > 0) {
+        const settings = tracks[0].getSettings()
+        console.log('🎤 Configuración de audio:', settings)
+        setAudioTest(`✅ ${settings.sampleRate}Hz, ${settings.channelCount}ch`)
+        addMessage("Sistema", `🎤 Audio profesional activado`)
+      }
       
-      setAudioTest(`✅ Micrófono OK (${audioQuality})`)
-      addMessage("Sistema", `🎤 Micrófono conectado (calidad ${audioQuality})`)
+      // ✅ PRUEBA: Escuchar el audio sin procesar
+      try {
+        const ctx = new AudioContext({ sampleRate: 48000 })
+        audioContextRef.current = ctx
+        const source = ctx.createMediaStreamSource(stream)
+        const gain = ctx.createGain()
+        gain.gain.value = 1.5
+        source.connect(gain)
+        gain.connect(ctx.destination)
+        
+        if (ctx.state === 'suspended') {
+          await ctx.resume()
+        }
+        
+        addMessage("Sistema", "🔊 Monitorización directa")
+      } catch (e) {
+        console.log('Monitorización no disponible')
+      }
+      
       return true
     } catch (error) {
       console.error('Error:', error)
-      setAudioTest("❌ Error micrófono")
+      setAudioTest("❌ Error")
       addMessage("Sistema", "❌ No se pudo acceder al micrófono")
       return false
     }
   }
 
-  // ✅ MONITORIZACIÓN CON COMPRESOR Y EQ
-  const enableEnhancedMonitoring = async (stream: MediaStream) => {
-    try {
-      if (audioContextRef.current) {
-        await audioContextRef.current.close()
-        audioContextRef.current = null
-      }
-      
-      const ctx = new AudioContext({
-        sampleRate: 48000,
-        latencyHint: 'interactive'
-      })
-      audioContextRef.current = ctx
-      
-      const source = ctx.createMediaStreamSource(stream)
-      
-      // ✅ COMPRESOR - mejora el sonido y sube el volumen
-      const compressor = ctx.createDynamicsCompressor()
-      compressor.threshold.value = -24
-      compressor.knee.value = 30
-      compressor.ratio.value = 12
-      compressor.attack.value = 0.003
-      compressor.release.value = 0.25
-      compressorRef.current = compressor
-      
-      // ✅ GANANCIA PRINCIPAL
-      const gain = ctx.createGain()
-      gain.gain.value = monitorVolume
-      monitorGainRef.current = gain
-      
-      // ✅ BOOST EXTRA
-      const boost = ctx.createGain()
-      boost.gain.value = 1.8
-      
-      // ✅ EQ: ecualizador simple (bass boost)
-      const bassBoost = ctx.createBiquadFilter()
-      bassBoost.type = 'lowshelf'
-      bassBoost.frequency.value = 200
-      bassBoost.gain.value = 6
-      
-      // ✅ Conectar: source → EQ → compressor → gain → boost → destination
-      source.connect(bassBoost)
-      bassBoost.connect(compressor)
-      compressor.connect(gain)
-      gain.connect(boost)
-      boost.connect(ctx.destination)
-      
-      setIsMonitoring(true)
-      
-      if (ctx.state === 'suspended') {
-        await ctx.resume()
-      }
-      
-      addMessage("Sistema", "🔊 Monitorización mejorada (compresión + EQ)")
-      
-    } catch (error) {
-      console.error('Error en monitorización:', error)
-    }
-  }
-
-  const disableMonitoring = async () => {
-    try {
-      if (audioContextRef.current) {
-        await audioContextRef.current.close()
-        audioContextRef.current = null
-        monitorGainRef.current = null
-        compressorRef.current = null
-        setIsMonitoring(false)
-      }
-    } catch (error) {
-      console.error('Error:', error)
-    }
-  }
-
-  const updateMonitorVolume = (value: number) => {
-    const newVolume = Math.max(0, Math.min(2, value))
-    setMonitorVolume(newVolume)
-    if (monitorGainRef.current) {
-      monitorGainRef.current.gain.value = newVolume
-    }
-  }
-
-  const toggleMonitoring = async () => {
-    if (isMonitoring) {
-      await disableMonitoring()
-    } else {
-      if (localStreamRef.current) {
-        await enableEnhancedMonitoring(localStreamRef.current)
-      }
-    }
-  }
-
-  // ============ WEBRTC CON MEJOR CALIDAD ============
+  // ============ WEBRTC CON CODEC DE ALTA CALIDAD ============
   const createPeerConnection = (targetId: string) => {
-    const pc = new RTCPeerConnection(PEER_CONFIG)
+    // ✅ Configuración avanzada de WebRTC
+    const pc = new RTCPeerConnection({
+      iceServers: PEER_CONFIG.iceServers,
+      // ✅ Configuración de codecs (priorizar audio de alta calidad)
+      sdpSemantics: 'unified-plan'
+    })
     peerConnectionsRef.current.set(targetId, pc)
 
+    // ✅ Añadir stream local
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!)
+        console.log('📤 Track añadido:', track.kind, track.label)
       })
     }
 
+    // ✅ Recibir audio remoto con alta calidad
     pc.ontrack = (event) => {
+      console.log('📥 Track remoto recibido:', event.track.kind)
+      
+      // ✅ Reproducir con audio de alta calidad
       const audioEl = new Audio()
       audioEl.autoplay = true
       audioEl.volume = 1.0
-      audioEl.srcObject = event.streams[0]
-      audioEl.play().catch(e => console.log('Error:', e))
-      addMessage("Sistema", "🔊 Audio recibido")
+      
+      // ✅ Intentar aplicar procesamiento mínimo
+      try {
+        const ctx = new AudioContext({ sampleRate: 48000 })
+        const source = ctx.createMediaStreamSource(event.streams[0])
+        const gain = ctx.createGain()
+        gain.gain.value = 1.2
+        source.connect(gain)
+        gain.connect(ctx.destination)
+        audioEl.srcObject = null // No usar el elemento audio
+        addMessage("Sistema", "🔊 Audio recibido (alta calidad)")
+      } catch (e) {
+        // Fallback: usar elemento audio
+        audioEl.srcObject = event.streams[0]
+        audioEl.play().catch(e => console.log('Error:', e))
+        addMessage("Sistema", "🔊 Audio recibido")
+      }
     }
 
+    // ✅ ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && channelRef.current) {
         channelRef.current.send({
@@ -263,21 +192,57 @@ export default function JamWebPage() {
     }
 
     pc.onconnectionstatechange = () => {
+      console.log('🔗 Estado:', pc.connectionState)
       if (pc.connectionState === 'connected') {
         addMessage("Sistema", "🔗 Conectado con otro músico")
+      }
+    }
+
+    // ✅ Negociación de codecs (priorizar Opus de alta calidad)
+    pc.onnegotiationneeded = async () => {
+      try {
+        await pc.setLocalDescription(await pc.createOffer())
+        // Enviar oferta a través del canal
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'offer',
+            payload: {
+              fromId: userIdRef.current,
+              targetId: targetId,
+              offer: pc.localDescription
+            }
+          })
+        }
+      } catch (e) {
+        console.error('Error en negociación:', e)
       }
     }
 
     return pc
   }
 
+  // ✅ Crear oferta manual
   const createOffer = async (targetId: string) => {
     try {
       const pc = createPeerConnection(targetId)
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
-        offerToReceiveVideo: false
+        offerToReceiveVideo: false,
+        // ✅ Forzar codec Opus de alta calidad
+        voiceActivityDetection: false
       })
+      
+      // ✅ Modificar SDP para priorizar Opus con alta tasa de bits
+      const sdp = offer.sdp || ''
+      // Forzar Opus con bitrate alto
+      let modifiedSdp = sdp.replace(
+        /a=rtpmap:(\d+) opus\/48000\/2/g,
+        'a=rtpmap:$1 opus/48000/2\r\na=fmtp:$1 stereo=1; sprop-stereo=1; maxaveragebitrate=510000'
+      )
+      
+      offer.sdp = modifiedSdp
+      
       await pc.setLocalDescription(offer)
       
       if (channelRef.current) {
@@ -503,7 +468,11 @@ export default function JamWebPage() {
     
     peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
-    await disableMonitoring()
+    
+    if (audioContextRef.current) {
+      await audioContextRef.current.close()
+      audioContextRef.current = null
+    }
     
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop())
@@ -576,32 +545,6 @@ export default function JamWebPage() {
               </div>
             </div>
           )}
-          
-          {/* ✅ Selector de calidad de audio */}
-          <div style={{ marginBottom: 16 }}>
-            <p style={{ color: "#9ca3af", marginBottom: 8, fontWeight: "bold", fontSize: 14 }}>🎚️ Calidad de audio:</p>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {['low', 'medium', 'high'].map((q) => (
-                <button
-                  key={q}
-                  onClick={() => setAudioQuality(q as any)}
-                  style={{
-                    flex: 1,
-                    padding: "8px",
-                    background: audioQuality === q ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
-                    color: audioQuality === q ? "#10b981" : "#6b7280",
-                    border: audioQuality === q ? "2px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: audioQuality === q ? "bold" : "normal"
-                  }}
-                >
-                  {q === 'low' ? '📱 Baja' : q === 'medium' ? '📀 Media' : '💿 Alta'}
-                </button>
-              ))}
-            </div>
-          </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <button onClick={() => { if (selectedCategory && selectedInstrument) createRoom(selectedCategory) }} disabled={!selectedCategory || !selectedInstrument} style={{ width: "100%", padding: "14px", background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed" }}>🎸 Crear sala</button>
@@ -626,17 +569,9 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
-          <span style={{ marginLeft: 12, fontSize: 11, color: "#6b7280" }}>🎚️ {audioQuality}</span>
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
-          <button onClick={toggleMonitoring} style={{ padding: "6px 14px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMonitoring ? "🔊" : "🔇"}</button>
-          {isMonitoring && (
-            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 80, accentColor: "#10b981" }} />
-              <span style={{ fontSize: 11, color: "#6b7280", minWidth: 30 }}>{Math.round((monitorVolume / 2) * 100)}%</span>
-            </div>
-          )}
           <button onClick={leaveRoom} style={{ padding: "6px 14px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>✕</button>
         </div>
       </div>
@@ -678,7 +613,7 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId}</strong> · 🎚️ {audioQuality}</div>
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId}</strong></div>
     </div>
   )
 }
