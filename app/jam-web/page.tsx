@@ -76,7 +76,7 @@ export default function JamWebPage() {
   // ============ AUDIO PROFESIONAL ============
   const startLocalStream = async () => {
     try {
-      // ✅ CONFIGURACIÓN PROFESIONAL
+      // ✅ CONFIGURACIÓN PROFESIONAL (sin latency)
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           // ✅ Sin procesamiento - audio más limpio
@@ -85,9 +85,7 @@ export default function JamWebPage() {
           autoGainControl: false,
           // ✅ Calidad máxima
           sampleRate: 48000,
-          channelCount: 2,
-          // ✅ Latencia mínima
-          latency: 0.005
+          channelCount: 2
         },
         video: false
       })
