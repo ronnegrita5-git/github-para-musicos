@@ -92,7 +92,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Iniciar stream local
   const startLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -123,19 +122,16 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Crear conexión peer
   const createPeerConnection = (targetId: string, targetName: string) => {
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
-    // ✅ Añadir stream local
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!)
       })
     }
 
-    // ✅ Recibir audio remoto
     pc.ontrack = (event) => {
       console.log(`📥 Audio recibido de ${targetName}`)
       
@@ -155,7 +151,6 @@ export default function JamWebPage() {
       }))
     }
 
-    // ✅ ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && channelRef.current) {
         channelRef.current.send({
@@ -181,7 +176,6 @@ export default function JamWebPage() {
     return pc
   }
 
-  // ✅ Crear oferta
   const createOffer = async (targetId: string, targetName: string) => {
     try {
       console.log(`📤 Creando oferta para ${targetName}`)
@@ -206,7 +200,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Manejar oferta
   const handleOffer = async (fromId: string, fromName: string, offer: RTCSessionDescriptionInit) => {
     try {
       console.log(`📥 Oferta recibida de ${fromName}`)
@@ -233,7 +226,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Manejar respuesta
   const handleAnswer = async (fromId: string, answer: RTCSessionDescriptionInit) => {
     try {
       const pc = peerConnectionsRef.current.get(fromId)
@@ -246,7 +238,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Manejar ICE candidate
   const handleIceCandidate = async (fromId: string, candidate: RTCIceCandidateInit) => {
     try {
       const pc = peerConnectionsRef.current.get(fromId)
@@ -258,7 +249,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Conectar con todos los participantes
   const connectToAll = async () => {
     const others = participants.filter(p => p.id !== userIdRef.current)
     
@@ -346,7 +336,6 @@ export default function JamWebPage() {
           return prev
         })
         
-        // ✅ Conectar con el nuevo usuario
         setTimeout(() => {
           if (payload.id !== userIdRef.current) {
             createOffer(payload.id, payload.name)
@@ -381,7 +370,6 @@ export default function JamWebPage() {
       .subscribe((status) => {
         console.log('🔊 Canal:', status)
         if (status === 'SUBSCRIBED') {
-          // ✅ Anunciar presencia
           channel.send({
             type: 'broadcast',
             event: 'user-joined',
@@ -393,7 +381,6 @@ export default function JamWebPage() {
             }
           })
           
-          // ✅ Conectar con participantes existentes
           setTimeout(() => {
             connectToAll()
           }, 1500)
@@ -467,8 +454,24 @@ export default function JamWebPage() {
 
   if (!isNameSet) {
     return (
-      <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-        <div style={{ maxWidth: 400, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", textAlign: "center" }}>
+      <div style={{
+        display: "flex",
+        minHeight: "100vh",
+        background: "#0a0a0a",
+        color: "white",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px"
+      }}>
+        <div style={{
+          maxWidth: 400,
+          width: "100%",
+          padding: 40,
+          borderRadius: 16,
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          textAlign: "center"
+        }}>
           <h1 style={{ fontSize: 48, marginBottom: 8 }}>🎵</h1>
           <h2 style={{ marginBottom: 24 }}>Jam Session</h2>
           <input
@@ -476,10 +479,33 @@ export default function JamWebPage() {
             value={myName}
             onChange={(e) => setMyName(e.target.value)}
             placeholder="Tu nombre"
-            style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 16, marginBottom: 16 }}
+            style={{
+              width: "100%",
+              padding: "10px 14px",
+              borderRadius: 8,
+              border: "1px solid #333",
+              background: "rgba(255,255,255,0.05)",
+              color: "white",
+              fontSize: 16,
+              marginBottom: 16
+            }}
             onKeyPress={(e) => e.key === "Enter" && setUsername()}
           />
-          <button onClick={setUsername} disabled={!myName.trim()} style={{ width: "100%", padding: "14px", background: myName.trim() ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: myName.trim() ? "pointer" : "not-allowed" }}>
+          <button
+            onClick={setUsername}
+            disabled={!myName.trim()}
+            style={{
+              width: "100%",
+              padding: "14px",
+              background: myName.trim() ? "#10b981" : "#444",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 16,
+              fontWeight: "bold",
+              cursor: myName.trim() ? "pointer" : "not-allowed"
+            }}
+          >
             Entrar
           </button>
         </div>
@@ -489,8 +515,23 @@ export default function JamWebPage() {
 
   if (!isInRoom) {
     return (
-      <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-        <div style={{ maxWidth: 600, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
+      <div style={{
+        display: "flex",
+        minHeight: "100vh",
+        background: "#0a0a0a",
+        color: "white",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px"
+      }}>
+        <div style={{
+          maxWidth: 600,
+          width: "100%",
+          padding: 40,
+          borderRadius: 16,
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.1)"
+        }}>
           <h1 style={{ fontSize: 48, textAlign: "center", marginBottom: 8 }}>🎵</h1>
           <h2 style={{ textAlign: "center", marginBottom: 24 }}>Jam Session</h2>
           
@@ -498,7 +539,24 @@ export default function JamWebPage() {
             <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎯 Elige el tipo de Jam:</p>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {Object.entries(CATEGORIES).map(([key, cat]) => (
-                <button key={key} onClick={() => { setSelectedCategory(key as CategoryKey); setSelectedInstrument("") }} style={{ flex: 1, minWidth: "120px", padding: "12px 16px", background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedCategory === key ? "#10b981" : "#9ca3af", border: selectedCategory === key ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", textAlign: "center" }}>
+                <button
+                  key={key}
+                  onClick={() => {
+                    setSelectedCategory(key as CategoryKey)
+                    setSelectedInstrument("")
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: "120px",
+                    padding: "12px 16px",
+                    background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
+                    color: selectedCategory === key ? "#10b981" : "#9ca3af",
+                    border: selectedCategory === key ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    textAlign: "center"
+                  }}
+                >
                   <div style={{ fontSize: 28 }}>{cat.emoji}</div>
                   <div style={{ fontSize: 13 }}>{cat.name}</div>
                 </button>
@@ -511,7 +569,19 @@ export default function JamWebPage() {
               <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎸 Elige tu instrumento:</p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {CATEGORIES[selectedCategory].instruments.map((inst) => (
-                  <button key={inst} onClick={() => setSelectedInstrument(inst)} style={{ padding: "8px 16px", background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedInstrument === inst ? "#10b981" : "#9ca3af", border: selectedInstrument === inst ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+                  <button
+                    key={inst}
+                    onClick={() => setSelectedInstrument(inst)}
+                    style={{
+                      padding: "8px 16px",
+                      background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
+                      color: selectedInstrument === inst ? "#10b981" : "#9ca3af",
+                      border: selectedInstrument === inst ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontSize: 14
+                    }}
+                  >
                     {getInstrumentEmoji(inst)} {inst}
                   </button>
                 ))}
@@ -520,12 +590,60 @@ export default function JamWebPage() {
           )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <button onClick={() => { if (selectedCategory && selectedInstrument) createRoom(selectedCategory) else addMessage("Sistema", "⚠️ Selecciona categoría e instrumento") }} disabled={!selectedCategory || !selectedInstrument} style={{ width: "100%", padding: "14px", background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed" }}>
+            <button
+              onClick={() => {
+                if (selectedCategory && selectedInstrument) {
+                  createRoom(selectedCategory)
+                } else {
+                  addMessage("Sistema", "⚠️ Selecciona categoría e instrumento")
+                }
+              }}
+              disabled={!selectedCategory || !selectedInstrument}
+              style={{
+                width: "100%",
+                padding: "14px",
+                background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444",
+                color: "white",
+                border: "none",
+                borderRadius: 8,
+                fontSize: 16,
+                fontWeight: "bold",
+                cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed"
+              }}
+            >
               🎸 Crear sala
             </button>
+
             <div style={{ display: "flex", gap: "8px" }}>
-              <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value.toUpperCase())} placeholder="Código de sala" style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 16, textTransform: "uppercase" }} />
-              <button onClick={joinRoom} disabled={!roomId.trim() || !selectedCategory || !selectedInstrument} style={{ padding: "10px 20px", background: (roomId.trim() && selectedCategory && selectedInstrument) ? "#3b82f6" : "#444", color: "white", border: "none", borderRadius: 8, cursor: (roomId.trim() && selectedCategory && selectedInstrument) ? "pointer" : "not-allowed", fontWeight: "bold" }}>
+              <input
+                type="text"
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                placeholder="Código de sala"
+                style={{
+                  flex: 1,
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "1px solid #333",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "white",
+                  fontSize: 16,
+                  textTransform: "uppercase"
+                }}
+              />
+              <button
+                onClick={joinRoom}
+                disabled={!roomId.trim() || !selectedCategory || !selectedInstrument}
+                style={{
+                  padding: "10px 20px",
+                  background: (roomId.trim() && selectedCategory && selectedInstrument) ? "#3b82f6" : "#444",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: (roomId.trim() && selectedCategory && selectedInstrument) ? "pointer" : "not-allowed",
+                  fontWeight: "bold"
+                }}
+              >
                 Unirse
               </button>
             </div>
@@ -536,62 +654,223 @@ export default function JamWebPage() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", flexWrap: "wrap", gap: "8px" }}>
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      minHeight: "100vh",
+      background: "#0a0a0a",
+      color: "white",
+      padding: "16px",
+      maxWidth: "1200px",
+      margin: "0 auto"
+    }}>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: "16px",
+        padding: "12px 16px",
+        background: "rgba(255,255,255,0.03)",
+        borderRadius: 8,
+        border: "1px solid rgba(255,255,255,0.1)",
+        flexWrap: "wrap",
+        gap: "8px"
+      }}>
         <div>
           <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 Sala: {roomId}</span>
-          <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 14, fontWeight: "bold" }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
+          <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 14, fontWeight: "bold" }}>
+            {roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}
+          </span>
           <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>👑 Dueño</span>}
-          {audioTest && <span style={{ marginLeft: 12, fontSize: 12, color: audioTest.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>}
+          {audioTest && (
+            <span style={{
+              marginLeft: 12,
+              fontSize: 12,
+              color: audioTest.includes("✅") ? "#10b981" : "#ef4444"
+            }}>
+              {audioTest}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMuted ? "🔇" : "🎤"}</button>
-          <button onClick={leaveRoom} style={{ padding: "4px 12px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>✕ Salir</button>
+          <button
+            onClick={toggleMute}
+            style={{
+              padding: "4px 12px",
+              background: isMuted ? "#ef4444" : "#10b981",
+              color: "white",
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 12
+            }}
+          >
+            {isMuted ? "🔇" : "🎤"}
+          </button>
+          <button
+            onClick={leaveRoom}
+            style={{
+              padding: "4px 12px",
+              background: "rgba(239,68,68,0.15)",
+              color: "#ef4444",
+              border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 12
+            }}
+          >
+            ✕ Salir
+          </button>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", flex: 1 }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "2fr 1fr",
+        gap: "16px",
+        flex: 1
+      }}>
         <div>
-          <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "16px", border: "1px solid rgba(255,255,255,0.05)", minHeight: "200px" }}>
+          <div style={{
+            background: "rgba(255,255,255,0.03)",
+            borderRadius: 8,
+            padding: "16px",
+            border: "1px solid rgba(255,255,255,0.05)",
+            minHeight: "200px"
+          }}>
             <h3 style={{ margin: "0 0 12px 0", color: "#9ca3af", fontSize: 14 }}>🎵 Participantes</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               {participants.map((p) => (
-                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "8px 12px", background: p.id === userIdRef.current ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", borderRadius: 6, border: p.id === userIdRef.current ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)" }}>
+                <div key={p.id} style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: "8px 12px",
+                  background: p.id === userIdRef.current ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)",
+                  borderRadius: 6,
+                  border: p.id === userIdRef.current ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)"
+                }}>
                   <span style={{ fontSize: 24 }}>{getInstrumentEmoji(p.instrument)}</span>
-                  <div style={{ flex: 1 }}><div style={{ fontWeight: p.id === userIdRef.current ? "bold" : "normal", color: "white" }}>{p.name} {p.id === userIdRef.current && "(tú)"}{p.isOwner && " 👑"}</div><div style={{ fontSize: 12, color: "#6b7280" }}>{p.instrument}</div></div>
-                  {p.id !== userIdRef.current && <span style={{ fontSize: 11, color: peerStatus[p.id]?.includes('✅') ? "#10b981" : "#fbbf24" }}>{peerStatus[p.id] || "⏳ Conectando..."}</span>}
+                  <div style={{ flex: 1 }}>
+                    <div style={{
+                      fontWeight: p.id === userIdRef.current ? "bold" : "normal",
+                      color: "white"
+                    }}>
+                      {p.name} {p.id === userIdRef.current && "(tú)"}{p.isOwner && " 👑"}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>{p.instrument}</div>
+                  </div>
+                  {p.id !== userIdRef.current && (
+                    <span style={{
+                      fontSize: 11,
+                      color: peerStatus[p.id]?.includes('✅') ? "#10b981" : "#fbbf24"
+                    }}>
+                      {peerStatus[p.id] || "⏳ Conectando..."}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
           </div>
           
-          <div style={{ marginTop: "12px", padding: "12px 16px", background: "rgba(16,185,129,0.05)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-            <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>🎧 <strong>Usa cascos</strong> para evitar feedback.</p>
+          <div style={{
+            marginTop: "12px",
+            padding: "12px 16px",
+            background: "rgba(16,185,129,0.05)",
+            borderRadius: 8,
+            border: "1px solid rgba(16,185,129,0.1)"
+          }}>
+            <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>
+              🎧 <strong>Usa cascos</strong> para evitar feedback.
+            </p>
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", height: "400px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden" }}>
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "400px",
+          background: "rgba(255,255,255,0.03)",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.05)",
+          overflow: "hidden"
+        }}>
+          <div style={{
+            padding: "8px 12px",
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
+          }}>
             <span style={{ color: "#9ca3af", fontWeight: "bold" }}>💬 Chat</span>
             <span style={{ fontSize: 11, color: "#6b7280" }}>{participants.length} conectados</span>
           </div>
-          <div style={{ flex: 1, padding: "12px 16px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div style={{
+            flex: 1,
+            padding: "12px 16px",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }}>
             {messages.map((msg) => (
-              <div key={msg.id} style={{ padding: "4px 12px", background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)", borderRadius: 6, fontSize: 14 }}>
-                <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>{msg.user === "Sistema" ? "📢 " : msg.user}:</span>
+              <div key={msg.id} style={{
+                padding: "4px 12px",
+                background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
+                borderRadius: 6,
+                fontSize: 14
+              }}>
+                <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>
+                  {msg.user === "Sistema" ? "📢 " : msg.user}:
+                </span>
                 <span style={{ color: "white", marginLeft: 4 }}>{msg.text}</span>
               </div>
             ))}
           </div>
-          <div style={{ display: "flex", padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.05)", gap: "8px" }}>
-            <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} onKeyPress={(e) => e.key === "Enter" && sendMessage()} placeholder="Escribe un mensaje..." style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 14 }} />
-            <button onClick={sendMessage} style={{ padding: "8px 16px", background: "#10b981", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: "bold" }}>Enviar</button>
+          <div style={{
+            display: "flex",
+            padding: "8px 12px",
+            borderTop: "1px solid rgba(255,255,255,0.05)",
+            gap: "8px"
+          }}>
+            <input
+              type="text"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && sendMessage()}
+              placeholder="Escribe un mensaje..."
+              style={{
+                flex: 1,
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "1px solid #333",
+                background: "rgba(255,255,255,0.05)",
+                color: "white",
+                fontSize: 14
+              }}
+            />
+            <button
+              onClick={sendMessage}
+              style={{
+                padding: "8px 16px",
+                background: "#10b981",
+                color: "white",
+                border: "none",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontWeight: "bold"
+              }}
+            >
+              Enviar
+            </button>
           </div>
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Comparte el código <strong>{roomId}</strong> con otros músicos</div>
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>
+        💡 Comparte el código <strong>{roomId}</strong> con otros músicos
+      </div>
     </div>
   )
 }
