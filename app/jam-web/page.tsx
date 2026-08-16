@@ -52,8 +52,9 @@ export default function JamWebPage() {
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
-  const [isMonitoring, setIsMonitoring] = useState(false) // ✅ Monitorización activa
-  const [monitorVolume, setMonitorVolume] = useState(0.5) // ✅ Volumen de monitorización
+  const [isMonitoring, setIsMonitoring] = useState(false)
+  // ✅ Volumen de monitorización ahora de 0 a 2 (x2 amplificación)
+  const [monitorVolume, setMonitorVolume] = useState(1.0)
   
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -76,7 +77,6 @@ export default function JamWebPage() {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
-  // ✅ INICIAR MICRÓFONO CON MONITORIZACIÓN
   const startLocalStream = async () => {
     try {
       console.log('🎤 Solicitando micrófono...')
@@ -93,11 +93,10 @@ export default function JamWebPage() {
       localStreamRef.current = stream
       console.log('✅ Micrófono obtenido:', stream.getAudioTracks().length, 'tracks')
       
-      // ✅ ACTIVAR MONITORIZACIÓN LOCAL (escucharte a ti mismo)
       await enableLocalMonitoring(stream)
       
-      setAudioTest("✅ Micrófono conectado + Monitorización")
-      addMessage("Sistema", "🎤 Micrófono conectado - Te escuchas a ti mismo")
+      setAudioTest("✅ Micrófono + Monitor")
+      addMessage("Sistema", "🎤 Micrófono conectado")
       return true
     } catch (error) {
       console.error('❌ Error al acceder al micrófono:', error)
@@ -107,10 +106,9 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ ACTIVAR MONITORIZACIÓN LOCAL (escucharte a ti mismo)
+  // ✅ ACTIVAR MONITORIZACIÓN CON GANANCIA EXTRA
   const enableLocalMonitoring = async (stream: MediaStream) => {
     try {
-      // Si ya hay monitorización, cerrarla
       if (audioContextRef.current) {
         await audioContextRef.current.close()
         audioContextRef.current = null
@@ -120,19 +118,25 @@ export default function JamWebPage() {
       audioContextRef.current = ctx
       
       const source = ctx.createMediaStreamSource(stream)
+      
+      // ✅ Primer gain para control de volumen (0-2)
       const gain = ctx.createGain()
       gain.gain.value = monitorVolume
       
+      // ✅ Segundo gain para amplificación extra (x1.5 fijo)
+      const boostGain = ctx.createGain()
+      boostGain.gain.value = 1.5 // Amplificación extra fija
+      
       source.connect(gain)
-      gain.connect(ctx.destination)
+      gain.connect(boostGain)
+      boostGain.connect(ctx.destination)
       
       monitorGainRef.current = gain
       setIsMonitoring(true)
       
-      console.log('🔊 Monitorización activada - Te escuchas a ti mismo')
-      addMessage("Sistema", "🔊 Monitorización activada (te escuchas a ti mismo)")
+      console.log('🔊 Monitorización activada con ganancia extra')
+      addMessage("Sistema", "🔊 Monitorización activada (volumen amplificado)")
       
-      // ✅ Si el contexto está suspendido, reanudarlo
       if (ctx.state === 'suspended') {
         await ctx.resume()
         console.log('▶️ AudioContext reanudado')
@@ -144,16 +148,15 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ CAMBIAR VOLUMEN DE MONITORIZACIÓN
+  // ✅ ACTUALIZAR VOLUMEN DE MONITORIZACIÓN (0 a 2)
   const updateMonitorVolume = (value: number) => {
-    const newVolume = Math.max(0, Math.min(1, value))
+    const newVolume = Math.max(0, Math.min(2, value))
     setMonitorVolume(newVolume)
     if (monitorGainRef.current) {
       monitorGainRef.current.gain.value = newVolume
     }
   }
 
-  // ✅ DESACTIVAR MONITORIZACIÓN
   const disableMonitoring = async () => {
     if (audioContextRef.current) {
       await audioContextRef.current.close()
@@ -181,7 +184,6 @@ export default function JamWebPage() {
     pc.ontrack = (event) => {
       console.log(`📥 Audio remoto recibido de ${targetId}`)
       
-      // ✅ Reproducir audio remoto (sin monitorización local)
       const audioEl = new Audio()
       audioEl.autoplay = true
       audioEl.volume = 0.8
@@ -215,7 +217,6 @@ export default function JamWebPage() {
     return pc
   }
 
-  // ✅ CREAR OFERTA
   const createOffer = async (targetId: string) => {
     try {
       console.log(`📤 Creando oferta para ${targetId}`)
@@ -239,7 +240,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ MANEJAR OFERTA
   const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
     try {
       console.log(`📥 Oferta recibida de ${fromId}`)
@@ -265,7 +265,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ MANEJAR RESPUESTA
   const handleAnswer = async (fromId: string, answer: RTCSessionDescriptionInit) => {
     try {
       const pc = peerConnectionsRef.current.get(fromId)
@@ -277,7 +276,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ MANEJAR ICE CANDIDATE
   const handleIceCandidate = async (fromId: string, candidate: RTCIceCandidateInit) => {
     try {
       const pc = peerConnectionsRef.current.get(fromId)
@@ -289,7 +287,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ CONECTAR CON TODOS
   const connectToAll = async () => {
     const others = participants.filter(p => p.id !== userIdRef.current)
     for (const p of others) {
@@ -564,7 +561,7 @@ export default function JamWebPage() {
           <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>👥 {participants.length}</span>
           {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>👑 Dueño</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
-          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor ON</span>}
+          {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 Monitor</span>}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMuted ? "🔇" : "🎤"}</button>
@@ -576,13 +573,13 @@ export default function JamWebPage() {
               <input
                 type="range"
                 min="0"
-                max="1"
+                max="2"
                 step="0.01"
                 value={monitorVolume}
                 onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))}
-                style={{ width: 60, accentColor: "#10b981" }}
+                style={{ width: 80, accentColor: "#10b981" }}
               />
-              <span style={{ fontSize: 10, color: "#6b7280" }}>{Math.round(monitorVolume * 100)}%</span>
+              <span style={{ fontSize: 10, color: "#6b7280", minWidth: 35 }}>{Math.round(monitorVolume * 100)}%</span>
             </div>
           )}
           <button onClick={leaveRoom} style={{ padding: "4px 12px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>✕ Salir</button>
