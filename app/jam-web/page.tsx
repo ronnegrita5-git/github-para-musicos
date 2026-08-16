@@ -66,23 +66,22 @@ export default function JamWebPage() {
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
+  const [peerStatus, setPeerStatus] = useState<Record<string, string>>({})
   
-  // Refs para WebRTC
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const userIdRef = useRef<string>("")
 
   const generateRoomId = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase()
   }
 
-  // ✅ Configuración STUN para WebRTC
   const PEER_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   }
 
@@ -93,7 +92,7 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Iniciar stream local (micrófono)
+  // ✅ Iniciar stream local
   const startLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -107,9 +106,8 @@ export default function JamWebPage() {
       })
       
       localStreamRef.current = stream
-      
-      // ✅ Verificar que el stream tiene audio
       const audioTracks = stream.getAudioTracks()
+      
       if (audioTracks.length === 0) {
         setAudioTest("❌ No hay tracks de audio")
         return
@@ -118,25 +116,15 @@ export default function JamWebPage() {
       setAudioTest("✅ Micrófono conectado")
       addMessage("Sistema", "🎤 Micrófono conectado")
       
-      // ✅ AUDIO LOCAL: Para escucharte a ti mismo (con cascos)
-      try {
-        const audio = new Audio()
-        audio.srcObject = stream
-        audio.muted = true // Para no crear feedback
-        audio.play().catch(e => console.log('Error playing local audio:', e))
-      } catch (e) {
-        console.log('Monitorización local no disponible')
-      }
-      
     } catch (error) {
       console.error('Error al acceder al micrófono:', error)
       setAudioTest("❌ Error: No se pudo acceder al micrófono")
-      addMessage("Sistema", "❌ No se pudo acceder al micrófono. Permite el acceso.")
+      addMessage("Sistema", "❌ No se pudo acceder al micrófono")
     }
   }
 
-  // ✅ Crear conexión peer con un participante
-  const createPeerConnection = (targetId: string) => {
+  // ✅ Crear conexión peer
+  const createPeerConnection = (targetId: string, targetName: string) => {
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
@@ -149,7 +137,8 @@ export default function JamWebPage() {
 
     // ✅ Recibir audio remoto
     pc.ontrack = (event) => {
-      // ✅ Crear elemento de audio para el stream remoto
+      console.log(`📥 Audio recibido de ${targetName}`)
+      
       let audioEl = audioElementsRef.current.get(targetId)
       if (!audioEl) {
         audioEl = new Audio()
@@ -158,9 +147,12 @@ export default function JamWebPage() {
         audioElementsRef.current.set(targetId, audioEl)
       }
       audioEl.srcObject = event.streams[0]
-      audioEl.play().catch(e => console.log('Error playing remote audio:', e))
+      audioEl.play().catch(e => console.log('Error playing audio:', e))
       
-      console.log('🔊 Audio remoto recibido de:', targetId)
+      setPeerStatus(prev => ({
+        ...prev,
+        [targetId]: '✅ Audio recibido'
+      }))
     }
 
     // ✅ ICE candidates
@@ -170,6 +162,7 @@ export default function JamWebPage() {
           type: 'broadcast',
           event: 'ice-candidate',
           payload: {
+            fromId: userIdRef.current,
             targetId: targetId,
             candidate: event.candidate
           }
@@ -177,21 +170,22 @@ export default function JamWebPage() {
       }
     }
 
-    // ✅ Estado de la conexión
     pc.onconnectionstatechange = () => {
-      console.log(`🔗 Conexión con ${targetId}: ${pc.connectionState}`)
-      if (pc.connectionState === 'connected') {
-        addMessage("Sistema", `🔗 Conectado con un músico`)
-      }
+      console.log(`🔗 Conexión con ${targetName}: ${pc.connectionState}`)
+      setPeerStatus(prev => ({
+        ...prev,
+        [targetId]: pc.connectionState === 'connected' ? '✅ Conectado' : `⏳ ${pc.connectionState}`
+      }))
     }
 
     return pc
   }
 
-  // ✅ Crear oferta (iniciar conexión)
-  const createOffer = async (targetId: string) => {
+  // ✅ Crear oferta
+  const createOffer = async (targetId: string, targetName: string) => {
     try {
-      const pc = createPeerConnection(targetId)
+      console.log(`📤 Creando oferta para ${targetName}`)
+      const pc = createPeerConnection(targetId, targetName)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       
@@ -200,7 +194,8 @@ export default function JamWebPage() {
           type: 'broadcast',
           event: 'offer',
           payload: {
-            fromId: user?.id,
+            fromId: userIdRef.current,
+            fromName: myName,
             targetId: targetId,
             offer: offer
           }
@@ -211,10 +206,11 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ Manejar oferta recibida
-  const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
+  // ✅ Manejar oferta
+  const handleOffer = async (fromId: string, fromName: string, offer: RTCSessionDescriptionInit) => {
     try {
-      const pc = createPeerConnection(fromId)
+      console.log(`📥 Oferta recibida de ${fromName}`)
+      const pc = createPeerConnection(fromId, fromName)
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
       
       const answer = await pc.createAnswer()
@@ -225,7 +221,8 @@ export default function JamWebPage() {
           type: 'broadcast',
           event: 'answer',
           payload: {
-            fromId: user?.id,
+            fromId: userIdRef.current,
+            fromName: myName,
             targetId: fromId,
             answer: answer
           }
@@ -242,6 +239,7 @@ export default function JamWebPage() {
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
+        console.log(`📥 Respuesta procesada de ${fromId}`)
       }
     } catch (error) {
       console.error('Error handling answer:', error)
@@ -262,18 +260,12 @@ export default function JamWebPage() {
 
   // ✅ Conectar con todos los participantes
   const connectToAll = async () => {
-    const otherParticipants = participants.filter(p => p.id !== user?.id)
+    const others = participants.filter(p => p.id !== userIdRef.current)
     
-    for (const p of otherParticipants) {
+    for (const p of others) {
       if (!peerConnectionsRef.current.has(p.id)) {
-        // ✅ Solo el dueño inicia conexiones (para simplificar)
-        if (isOwner) {
-          await createOffer(p.id)
-        } else {
-          // Si no somos dueños, esperamos a que nos conecten
-          // O intentamos conectar también
-          await createOffer(p.id)
-        }
+        console.log(`🔗 Conectando con ${p.name} (${p.id})`)
+        await createOffer(p.id, p.name)
       }
     }
   }
@@ -289,17 +281,20 @@ export default function JamWebPage() {
     setIsOwner(true)
     setSelectedCategory(category)
     setRoomCategory(category)
+    
+    userIdRef.current = user?.id || `local-${Date.now()}`
+    
     await startLocalStream()
     setIsInRoom(true)
     
     setParticipants([{ 
-      id: user?.id || 'local', 
+      id: userIdRef.current, 
       name: myName || user?.email || 'Anónimo',
       instrument: selectedInstrument,
       isOwner: true
     }])
     
-    addMessage("Sistema", `👑 ${myName} ha creado la sala ${newRoomId} con ${selectedInstrument}`)
+    addMessage("Sistema", `👑 ${myName} ha creado la sala ${newRoomId}`)
     subscribeToRoom(newRoomId, category)
   }
 
@@ -314,15 +309,17 @@ export default function JamWebPage() {
     }
 
     setIsOwner(false)
+    userIdRef.current = user?.id || `local-${Date.now()}`
+    
     await startLocalStream()
     setIsInRoom(true)
     setParticipants([{ 
-      id: user?.id || 'local', 
+      id: userIdRef.current, 
       name: myName || user?.email || 'Anónimo',
       instrument: selectedInstrument,
       isOwner: false
     }])
-    addMessage("Sistema", `🎵 ${myName} se ha unido a la sala ${roomId} con ${selectedInstrument}`)
+    addMessage("Sistema", `🎵 ${myName} se ha unido a la sala ${roomId}`)
     subscribeToRoom(roomId, selectedCategory || 'moderna')
   }
 
@@ -349,12 +346,10 @@ export default function JamWebPage() {
           return prev
         })
         
-        // ✅ Conectar con el nuevo participante (esperar un poco)
+        // ✅ Conectar con el nuevo usuario
         setTimeout(() => {
-          if (isOwner) {
-            createOffer(payload.id)
-          } else {
-            createOffer(payload.id)
+          if (payload.id !== userIdRef.current) {
+            createOffer(payload.id, payload.name)
           }
         }, 1000)
       })
@@ -362,43 +357,36 @@ export default function JamWebPage() {
         addMessage("Sistema", `👤 ${payload.name} ha salido`)
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
         
-        // ✅ Cerrar conexión peer
         const pc = peerConnectionsRef.current.get(payload.id)
-        if (pc) {
-          pc.close()
-          peerConnectionsRef.current.delete(payload.id)
-        }
-        // ✅ Eliminar elemento de audio
-        const audioEl = audioElementsRef.current.get(payload.id)
-        if (audioEl) {
-          audioEl.pause()
-          audioEl.srcObject = null
-          audioElementsRef.current.delete(payload.id)
-        }
+        if (pc) { pc.close(); peerConnectionsRef.current.delete(payload.id) }
+        const audio = audioElementsRef.current.get(payload.id)
+        if (audio) { audio.pause(); audio.srcObject = null; audioElementsRef.current.delete(payload.id) }
+        setPeerStatus(prev => { const newStatus = {...prev}; delete newStatus[payload.id]; return newStatus })
       })
       .on('broadcast', { event: 'offer' }, ({ payload }) => {
-        if (payload.targetId === user?.id) {
-          handleOffer(payload.fromId, payload.offer)
+        if (payload.targetId === userIdRef.current) {
+          handleOffer(payload.fromId, payload.fromName, payload.offer)
         }
       })
       .on('broadcast', { event: 'answer' }, ({ payload }) => {
-        if (payload.targetId === user?.id) {
+        if (payload.targetId === userIdRef.current) {
           handleAnswer(payload.fromId, payload.answer)
         }
       })
       .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
-        if (payload.targetId === user?.id) {
+        if (payload.targetId === userIdRef.current) {
           handleIceCandidate(payload.fromId, payload.candidate)
         }
       })
       .subscribe((status) => {
-        console.log('🔊 Canal de señalización:', status)
+        console.log('🔊 Canal:', status)
         if (status === 'SUBSCRIBED') {
+          // ✅ Anunciar presencia
           channel.send({
             type: 'broadcast',
             event: 'user-joined',
             payload: { 
-              id: user?.id || 'local', 
+              id: userIdRef.current, 
               name: myName || 'Anónimo',
               instrument: selectedInstrument,
               isOwner: isOwner
@@ -415,9 +403,9 @@ export default function JamWebPage() {
 
   const toggleMute = () => {
     if (localStreamRef.current) {
-      const audioTrack = localStreamRef.current.getAudioTracks()[0]
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled
+      const track = localStreamRef.current.getAudioTracks()[0]
+      if (track) {
+        track.enabled = !track.enabled
         setIsMuted(!isMuted)
         addMessage("Sistema", isMuted ? "🎤 Micrófono activado" : "🔇 Micrófono desactivado")
       }
@@ -425,12 +413,7 @@ export default function JamWebPage() {
   }
 
   const addMessage = (user: string, text: string) => {
-    setMessages(prev => [...prev, {
-      id: Date.now().toString(),
-      user,
-      text,
-      timestamp: Date.now()
-    }])
+    setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
   const sendMessage = () => {
@@ -444,25 +427,19 @@ export default function JamWebPage() {
       channelRef.current.send({
         type: 'broadcast',
         event: 'user-left',
-        payload: { id: user?.id, name: myName || 'Anónimo' }
+        payload: { id: userIdRef.current, name: myName || 'Anónimo' }
       })
       channelRef.current.unsubscribe()
       channelRef.current = null
     }
     
-    // ✅ Cerrar todas las conexiones
-    peerConnectionsRef.current.forEach((pc) => pc.close())
+    peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
-    
-    // ✅ Limpiar elementos de audio
-    audioElementsRef.current.forEach((audio) => {
-      audio.pause()
-      audio.srcObject = null
-    })
+    audioElementsRef.current.forEach(audio => { audio.pause(); audio.srcObject = null })
     audioElementsRef.current.clear()
     
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop())
+      localStreamRef.current.getTracks().forEach(t => t.stop())
       localStreamRef.current = null
     }
     
@@ -476,6 +453,7 @@ export default function JamWebPage() {
     setSelectedInstrument("")
     setRoomCategory("")
     setAudioTest("")
+    setPeerStatus({})
   }
 
   if (!user) {
@@ -489,61 +467,19 @@ export default function JamWebPage() {
 
   if (!isNameSet) {
     return (
-      <div style={{
-        display: "flex",
-        minHeight: "100vh",
-        background: "#0a0a0a",
-        color: "white",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px"
-      }}>
-        <div style={{
-          maxWidth: 400,
-          width: "100%",
-          padding: 40,
-          borderRadius: 16,
-          background: "rgba(255,255,255,0.05)",
-          border: "1px solid rgba(255,255,255,0.1)",
-          textAlign: "center"
-        }}>
+      <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        <div style={{ maxWidth: 400, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", textAlign: "center" }}>
           <h1 style={{ fontSize: 48, marginBottom: 8 }}>🎵</h1>
           <h2 style={{ marginBottom: 24 }}>Jam Session</h2>
-          <p style={{ color: "#6b7280", marginBottom: 20 }}>
-            Introduce tu nombre
-          </p>
           <input
             type="text"
             value={myName}
             onChange={(e) => setMyName(e.target.value)}
             placeholder="Tu nombre"
-            style={{
-              width: "100%",
-              padding: "10px 14px",
-              borderRadius: 8,
-              border: "1px solid #333",
-              background: "rgba(255,255,255,0.05)",
-              color: "white",
-              fontSize: 16,
-              marginBottom: 16
-            }}
+            style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 16, marginBottom: 16 }}
             onKeyPress={(e) => e.key === "Enter" && setUsername()}
           />
-          <button
-            onClick={setUsername}
-            disabled={!myName.trim()}
-            style={{
-              width: "100%",
-              padding: "14px",
-              background: myName.trim() ? "#10b981" : "#444",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              fontSize: 16,
-              fontWeight: "bold",
-              cursor: myName.trim() ? "pointer" : "not-allowed"
-            }}
-          >
+          <button onClick={setUsername} disabled={!myName.trim()} style={{ width: "100%", padding: "14px", background: myName.trim() ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: myName.trim() ? "pointer" : "not-allowed" }}>
             Entrar
           </button>
         </div>
@@ -553,50 +489,16 @@ export default function JamWebPage() {
 
   if (!isInRoom) {
     return (
-      <div style={{
-        display: "flex",
-        minHeight: "100vh",
-        background: "#0a0a0a",
-        color: "white",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px"
-      }}>
-        <div style={{
-          maxWidth: 600,
-          width: "100%",
-          padding: 40,
-          borderRadius: 16,
-          background: "rgba(255,255,255,0.05)",
-          border: "1px solid rgba(255,255,255,0.1)"
-        }}>
+      <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        <div style={{ maxWidth: 600, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
           <h1 style={{ fontSize: 48, textAlign: "center", marginBottom: 8 }}>🎵</h1>
           <h2 style={{ textAlign: "center", marginBottom: 24 }}>Jam Session</h2>
           
           <div style={{ marginBottom: 20 }}>
-            <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>
-              🎯 Elige el tipo de Jam:
-            </p>
+            <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎯 Elige el tipo de Jam:</p>
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {Object.entries(CATEGORIES).map(([key, cat]) => (
-                <button
-                  key={key}
-                  onClick={() => {
-                    setSelectedCategory(key as CategoryKey)
-                    setSelectedInstrument("")
-                  }}
-                  style={{
-                    flex: 1,
-                    minWidth: "120px",
-                    padding: "12px 16px",
-                    background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
-                    color: selectedCategory === key ? "#10b981" : "#9ca3af",
-                    border: selectedCategory === key ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    textAlign: "center"
-                  }}
-                >
+                <button key={key} onClick={() => { setSelectedCategory(key as CategoryKey); setSelectedInstrument("") }} style={{ flex: 1, minWidth: "120px", padding: "12px 16px", background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedCategory === key ? "#10b981" : "#9ca3af", border: selectedCategory === key ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", textAlign: "center" }}>
                   <div style={{ fontSize: 28 }}>{cat.emoji}</div>
                   <div style={{ fontSize: 13 }}>{cat.name}</div>
                 </button>
@@ -606,24 +508,10 @@ export default function JamWebPage() {
 
           {selectedCategory && (
             <div style={{ marginBottom: 20 }}>
-              <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>
-                🎸 Elige tu instrumento:
-              </p>
+              <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎸 Elige tu instrumento:</p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {CATEGORIES[selectedCategory].instruments.map((inst) => (
-                  <button
-                    key={inst}
-                    onClick={() => setSelectedInstrument(inst)}
-                    style={{
-                      padding: "8px 16px",
-                      background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)",
-                      color: selectedInstrument === inst ? "#10b981" : "#9ca3af",
-                      border: selectedInstrument === inst ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      fontSize: 14
-                    }}
-                  >
+                  <button key={inst} onClick={() => setSelectedInstrument(inst)} style={{ padding: "8px 16px", background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedInstrument === inst ? "#10b981" : "#9ca3af", border: selectedInstrument === inst ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
                     {getInstrumentEmoji(inst)} {inst}
                   </button>
                 ))}
@@ -632,60 +520,12 @@ export default function JamWebPage() {
           )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <button
-              onClick={() => {
-                if (selectedCategory && selectedInstrument) {
-                  createRoom(selectedCategory)
-                } else {
-                  addMessage("Sistema", "⚠️ Selecciona categoría e instrumento")
-                }
-              }}
-              disabled={!selectedCategory || !selectedInstrument}
-              style={{
-                width: "100%",
-                padding: "14px",
-                background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 16,
-                fontWeight: "bold",
-                cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed"
-              }}
-            >
+            <button onClick={() => { if (selectedCategory && selectedInstrument) createRoom(selectedCategory) else addMessage("Sistema", "⚠️ Selecciona categoría e instrumento") }} disabled={!selectedCategory || !selectedInstrument} style={{ width: "100%", padding: "14px", background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed" }}>
               🎸 Crear sala
             </button>
-
             <div style={{ display: "flex", gap: "8px" }}>
-              <input
-                type="text"
-                value={roomId}
-                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-                placeholder="Código de sala"
-                style={{
-                  flex: 1,
-                  padding: "10px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #333",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "white",
-                  fontSize: 16,
-                  textTransform: "uppercase"
-                }}
-              />
-              <button
-                onClick={joinRoom}
-                disabled={!roomId.trim() || !selectedCategory || !selectedInstrument}
-                style={{
-                  padding: "10px 20px",
-                  background: (roomId.trim() && selectedCategory && selectedInstrument) ? "#3b82f6" : "#444",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: (roomId.trim() && selectedCategory && selectedInstrument) ? "pointer" : "not-allowed",
-                  fontWeight: "bold"
-                }}
-              >
+              <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value.toUpperCase())} placeholder="Código de sala" style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 16, textTransform: "uppercase" }} />
+              <button onClick={joinRoom} disabled={!roomId.trim() || !selectedCategory || !selectedInstrument} style={{ padding: "10px 20px", background: (roomId.trim() && selectedCategory && selectedInstrument) ? "#3b82f6" : "#444", color: "white", border: "none", borderRadius: 8, cursor: (roomId.trim() && selectedCategory && selectedInstrument) ? "pointer" : "not-allowed", fontWeight: "bold" }}>
                 Unirse
               </button>
             </div>
@@ -696,232 +536,62 @@ export default function JamWebPage() {
   }
 
   return (
-    <div style={{ 
-      display: "flex", 
-      flexDirection: "column",
-      minHeight: "100vh", 
-      background: "#0a0a0a", 
-      color: "white",
-      padding: "16px",
-      maxWidth: "1200px",
-      margin: "0 auto"
-    }}>
-      {/* Header */}
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: "16px",
-        padding: "12px 16px",
-        background: "rgba(255,255,255,0.03)",
-        borderRadius: 8,
-        border: "1px solid rgba(255,255,255,0.1)",
-        flexWrap: "wrap",
-        gap: "8px"
-      }}>
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "16px", maxWidth: "1200px", margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", flexWrap: "wrap", gap: "8px" }}>
         <div>
-          <span style={{ color: "#10b981", fontWeight: "bold" }}>
-            🎵 Sala: {roomId}
-          </span>
-          <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 14, fontWeight: "bold" }}>
-            {roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}
-          </span>
-          <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>
-            👥 {participants.length}
-          </span>
-          {isOwner && (
-            <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>
-              👑 Dueño
-            </span>
-          )}
-          {audioTest && (
-            <span style={{ 
-              marginLeft: 12, 
-              fontSize: 12, 
-              color: audioTest.includes("✅") ? "#10b981" : "#ef4444" 
-            }}>
-              {audioTest}
-            </span>
-          )}
+          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 Sala: {roomId}</span>
+          <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 14, fontWeight: "bold" }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
+          <span style={{ color: "#6b7280", marginLeft: 12, fontSize: 13 }}>👥 {participants.length}</span>
+          {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12, fontSize: 13 }}>👑 Dueño</span>}
+          {audioTest && <span style={{ marginLeft: 12, fontSize: 12, color: audioTest.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button
-            onClick={toggleMute}
-            style={{
-              padding: "4px 12px",
-              background: isMuted ? "#ef4444" : "#10b981",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 12
-            }}
-          >
-            {isMuted ? "🔇" : "🎤"}
-          </button>
-          <button
-            onClick={leaveRoom}
-            style={{
-              padding: "4px 12px",
-              background: "rgba(239,68,68,0.15)",
-              color: "#ef4444",
-              border: "1px solid rgba(239,68,68,0.3)",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 12
-            }}
-          >
-            ✕ Salir
-          </button>
+          <button onClick={toggleMute} style={{ padding: "4px 12px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>{isMuted ? "🔇" : "🎤"}</button>
+          <button onClick={leaveRoom} style={{ padding: "4px 12px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>✕ Salir</button>
         </div>
       </div>
 
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "2fr 1fr",
-        gap: "16px",
-        flex: 1
-      }}>
-        {/* Lista de participantes */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", flex: 1 }}>
         <div>
-          <div style={{
-            background: "rgba(255,255,255,0.03)",
-            borderRadius: 8,
-            padding: "16px",
-            border: "1px solid rgba(255,255,255,0.05)",
-            minHeight: "200px"
-          }}>
-            <h3 style={{ margin: "0 0 12px 0", color: "#9ca3af", fontSize: 14 }}>
-              🎵 Participantes en la Jam
-            </h3>
+          <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "16px", border: "1px solid rgba(255,255,255,0.05)", minHeight: "200px" }}>
+            <h3 style={{ margin: "0 0 12px 0", color: "#9ca3af", fontSize: 14 }}>🎵 Participantes</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               {participants.map((p) => (
-                <div key={p.id} style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  padding: "8px 12px",
-                  background: p.id === user?.id ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)",
-                  borderRadius: 6,
-                  border: p.id === user?.id ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)"
-                }}>
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "8px 12px", background: p.id === userIdRef.current ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", borderRadius: 6, border: p.id === userIdRef.current ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)" }}>
                   <span style={{ fontSize: 24 }}>{getInstrumentEmoji(p.instrument)}</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: p.id === user?.id ? "bold" : "normal", color: "white" }}>
-                      {p.name} {p.id === user?.id && "(tú)"}
-                      {p.isOwner && " 👑"}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>{p.instrument}</div>
-                  </div>
-                  {p.id !== user?.id && (
-                    <span style={{ fontSize: 11, color: "#10b981" }}>
-                      {peerConnectionsRef.current.has(p.id) ? "🔗 Conectado" : "⏳ Conectando..."}
-                    </span>
-                  )}
+                  <div style={{ flex: 1 }}><div style={{ fontWeight: p.id === userIdRef.current ? "bold" : "normal", color: "white" }}>{p.name} {p.id === userIdRef.current && "(tú)"}{p.isOwner && " 👑"}</div><div style={{ fontSize: 12, color: "#6b7280" }}>{p.instrument}</div></div>
+                  {p.id !== userIdRef.current && <span style={{ fontSize: 11, color: peerStatus[p.id]?.includes('✅') ? "#10b981" : "#fbbf24" }}>{peerStatus[p.id] || "⏳ Conectando..."}</span>}
                 </div>
               ))}
             </div>
           </div>
           
-          {/* Instrucciones para usar cascos */}
-          <div style={{
-            marginTop: "12px",
-            padding: "12px 16px",
-            background: "rgba(16,185,129,0.05)",
-            borderRadius: 8,
-            border: "1px solid rgba(16,185,129,0.1)"
-          }}>
-            <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>
-              🎧 <strong>Usa cascos</strong> para evitar feedback y mejorar la calidad del audio.
-            </p>
+          <div style={{ marginTop: "12px", padding: "12px 16px", background: "rgba(16,185,129,0.05)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
+            <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>🎧 <strong>Usa cascos</strong> para evitar feedback.</p>
           </div>
         </div>
 
-        {/* Chat */}
-        <div style={{
-          display: "flex",
-          flexDirection: "column",
-          height: "400px",
-          background: "rgba(255,255,255,0.03)",
-          borderRadius: 8,
-          border: "1px solid rgba(255,255,255,0.05)",
-          overflow: "hidden"
-        }}>
-          <div style={{
-            padding: "8px 12px",
-            borderBottom: "1px solid rgba(255,255,255,0.05)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center"
-          }}>
+        <div style={{ display: "flex", flexDirection: "column", height: "400px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden" }}>
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ color: "#9ca3af", fontWeight: "bold" }}>💬 Chat</span>
             <span style={{ fontSize: 11, color: "#6b7280" }}>{participants.length} conectados</span>
           </div>
-          <div style={{
-            flex: 1,
-            padding: "12px 16px",
-            overflowY: "auto",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px"
-          }}>
+          <div style={{ flex: 1, padding: "12px 16px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "4px" }}>
             {messages.map((msg) => (
-              <div key={msg.id} style={{
-                padding: "4px 12px",
-                background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)",
-                borderRadius: 6,
-                fontSize: 14
-              }}>
-                <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>
-                  {msg.user === "Sistema" ? "📢 " : msg.user}:
-                </span>
+              <div key={msg.id} style={{ padding: "4px 12px", background: msg.user === "Sistema" ? "rgba(16,185,129,0.05)" : "rgba(255,255,255,0.03)", borderRadius: 6, fontSize: 14 }}>
+                <span style={{ color: msg.user === "Sistema" ? "#10b981" : "#6b7280", fontWeight: "bold" }}>{msg.user === "Sistema" ? "📢 " : msg.user}:</span>
                 <span style={{ color: "white", marginLeft: 4 }}>{msg.text}</span>
               </div>
             ))}
           </div>
-          <div style={{
-            display: "flex",
-            padding: "8px 12px",
-            borderTop: "1px solid rgba(255,255,255,0.05)",
-            gap: "8px"
-          }}>
-            <input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && sendMessage()}
-              placeholder="Escribe un mensaje..."
-              style={{
-                flex: 1,
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid #333",
-                background: "rgba(255,255,255,0.05)",
-                color: "white",
-                fontSize: 14
-              }}
-            />
-            <button
-              onClick={sendMessage}
-              style={{
-                padding: "8px 16px",
-                background: "#10b981",
-                color: "white",
-                border: "none",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontWeight: "bold"
-              }}
-            >
-              Enviar
-            </button>
+          <div style={{ display: "flex", padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.05)", gap: "8px" }}>
+            <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} onKeyPress={(e) => e.key === "Enter" && sendMessage()} placeholder="Escribe un mensaje..." style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 14 }} />
+            <button onClick={sendMessage} style={{ padding: "8px 16px", background: "#10b981", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: "bold" }}>Enviar</button>
           </div>
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>
-        💡 Comparte el código <strong>{roomId}</strong> con otros músicos
-      </div>
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Comparte el código <strong>{roomId}</strong> con otros músicos</div>
     </div>
   )
 }
