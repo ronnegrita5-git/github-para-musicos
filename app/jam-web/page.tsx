@@ -57,13 +57,11 @@ export default function JamWebPage() {
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
   const userIdRef = useRef<string>("")
-  const audioContextRef = useRef<AudioContext | null>(null)
 
   const PEER_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   }
 
@@ -73,53 +71,21 @@ export default function JamWebPage() {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
-  // ============ AUDIO PROFESIONAL ============
+  // ============ AUDIO SIMPLE ============
   const startLocalStream = async () => {
     try {
-      // ✅ CONFIGURACIÓN PROFESIONAL (sin latency)
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          // ✅ Sin procesamiento - audio más limpio
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          // ✅ Calidad máxima
-          sampleRate: 48000,
-          channelCount: 2
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
         },
         video: false
       })
       
       localStreamRef.current = stream
-      
-      // ✅ Verificar calidad del stream
-      const tracks = stream.getAudioTracks()
-      if (tracks.length > 0) {
-        const settings = tracks[0].getSettings()
-        console.log('🎤 Configuración de audio:', settings)
-        setAudioTest(`✅ ${settings.sampleRate}Hz, ${settings.channelCount}ch`)
-        addMessage("Sistema", `🎤 Audio profesional activado`)
-      }
-      
-      // ✅ PRUEBA: Escuchar el audio sin procesar
-      try {
-        const ctx = new AudioContext({ sampleRate: 48000 })
-        audioContextRef.current = ctx
-        const source = ctx.createMediaStreamSource(stream)
-        const gain = ctx.createGain()
-        gain.gain.value = 1.5
-        source.connect(gain)
-        gain.connect(ctx.destination)
-        
-        if (ctx.state === 'suspended') {
-          await ctx.resume()
-        }
-        
-        addMessage("Sistema", "🔊 Monitorización directa")
-      } catch (e) {
-        console.log('Monitorización no disponible')
-      }
-      
+      setAudioTest("✅ Micrófono OK")
+      addMessage("Sistema", "🎤 Micrófono conectado")
       return true
     } catch (error) {
       console.error('Error:', error)
@@ -129,52 +95,26 @@ export default function JamWebPage() {
     }
   }
 
-  // ============ WEBRTC CON CODEC DE ALTA CALIDAD ============
+  // ============ WEBRTC ============
   const createPeerConnection = (targetId: string) => {
-    // ✅ Configuración avanzada de WebRTC
-    const pc = new RTCPeerConnection({
-      iceServers: PEER_CONFIG.iceServers,
-      // ✅ Configuración de codecs (priorizar audio de alta calidad)
-      sdpSemantics: 'unified-plan'
-    })
+    const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
-    // ✅ Añadir stream local
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!)
-        console.log('📤 Track añadido:', track.kind, track.label)
       })
     }
 
-    // ✅ Recibir audio remoto con alta calidad
     pc.ontrack = (event) => {
-      console.log('📥 Track remoto recibido:', event.track.kind)
-      
-      // ✅ Reproducir con audio de alta calidad
       const audioEl = new Audio()
       audioEl.autoplay = true
       audioEl.volume = 1.0
-      
-      // ✅ Intentar aplicar procesamiento mínimo
-      try {
-        const ctx = new AudioContext({ sampleRate: 48000 })
-        const source = ctx.createMediaStreamSource(event.streams[0])
-        const gain = ctx.createGain()
-        gain.gain.value = 1.2
-        source.connect(gain)
-        gain.connect(ctx.destination)
-        audioEl.srcObject = null // No usar el elemento audio
-        addMessage("Sistema", "🔊 Audio recibido (alta calidad)")
-      } catch (e) {
-        // Fallback: usar elemento audio
-        audioEl.srcObject = event.streams[0]
-        audioEl.play().catch(e => console.log('Error:', e))
-        addMessage("Sistema", "🔊 Audio recibido")
-      }
+      audioEl.srcObject = event.streams[0]
+      audioEl.play().catch(e => console.log('Error:', e))
+      addMessage("Sistema", "🔊 Audio recibido")
     }
 
-    // ✅ ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && channelRef.current) {
         channelRef.current.send({
@@ -190,57 +130,18 @@ export default function JamWebPage() {
     }
 
     pc.onconnectionstatechange = () => {
-      console.log('🔗 Estado:', pc.connectionState)
       if (pc.connectionState === 'connected') {
         addMessage("Sistema", "🔗 Conectado con otro músico")
-      }
-    }
-
-    // ✅ Negociación de codecs (priorizar Opus de alta calidad)
-    pc.onnegotiationneeded = async () => {
-      try {
-        await pc.setLocalDescription(await pc.createOffer())
-        // Enviar oferta a través del canal
-        if (channelRef.current) {
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'offer',
-            payload: {
-              fromId: userIdRef.current,
-              targetId: targetId,
-              offer: pc.localDescription
-            }
-          })
-        }
-      } catch (e) {
-        console.error('Error en negociación:', e)
       }
     }
 
     return pc
   }
 
-  // ✅ Crear oferta manual
   const createOffer = async (targetId: string) => {
     try {
       const pc = createPeerConnection(targetId)
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: false,
-        // ✅ Forzar codec Opus de alta calidad
-        voiceActivityDetection: false
-      })
-      
-      // ✅ Modificar SDP para priorizar Opus con alta tasa de bits
-      const sdp = offer.sdp || ''
-      // Forzar Opus con bitrate alto
-      let modifiedSdp = sdp.replace(
-        /a=rtpmap:(\d+) opus\/48000\/2/g,
-        'a=rtpmap:$1 opus/48000/2\r\na=fmtp:$1 stereo=1; sprop-stereo=1; maxaveragebitrate=510000'
-      )
-      
-      offer.sdp = modifiedSdp
-      
+      const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       
       if (channelRef.current) {
@@ -453,7 +354,7 @@ export default function JamWebPage() {
     setInputMessage("")
   }
 
-  const leaveRoom = async () => {
+  const leaveRoom = () => {
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -466,11 +367,6 @@ export default function JamWebPage() {
     
     peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
-    
-    if (audioContextRef.current) {
-      await audioContextRef.current.close()
-      audioContextRef.current = null
-    }
     
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop())
