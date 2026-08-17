@@ -215,6 +215,7 @@ export default function JamWebPage() {
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
+  const [isListener, setIsListener] = useState(false) // ✅ Nuevo: modo oyente
   
   // Estado de la Jam
   const [messages, setMessages] = useState<any[]>([])
@@ -244,10 +245,10 @@ export default function JamWebPage() {
   const lastActivityRef = useRef<number>(Date.now())
   const inactivityCheckRef = useRef<NodeJS.Timeout | null>(null)
   
-  const HEARTBEAT_INTERVAL = 15000 // 15 segundos
-  const HEARTBEAT_TIMEOUT = 45000 // 45 segundos sin heartbeat
-  const INACTIVITY_LIMIT = 10 * 60 * 1000 // 10 minutos
-  const INACTIVITY_WARNING = 9 * 60 * 1000 // 9 minutos (aviso 1 minuto antes)
+  const HEARTBEAT_INTERVAL = 15000
+  const HEARTBEAT_TIMEOUT = 45000
+  const INACTIVITY_LIMIT = 10 * 60 * 1000
+  const INACTIVITY_WARNING = 9 * 60 * 1000
 
   const PEER_CONFIG = {
     iceServers: [
@@ -261,13 +262,12 @@ export default function JamWebPage() {
     registerActivity()
   }
 
-  // ✅ REGISTRAR ACTIVIDAD
   const registerActivity = () => {
     lastActivityRef.current = Date.now()
     setInactivityWarning(false)
   }
 
-  // ✅ HEARTBEAT: El admin envía "latidos"
+  // ✅ HEARTBEAT
   const sendHeartbeat = async () => {
     if (!isAdmin || !roomId) return
     
@@ -288,7 +288,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ VERIFICAR HEARTBEAT
   const checkHeartbeat = async () => {
     if (!isAdmin || !roomId) return
     
@@ -302,7 +301,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ VERIFICAR INACTIVIDAD
   const checkInactivity = async () => {
     if (!isAdmin || !roomId) return
     
@@ -406,6 +404,7 @@ export default function JamWebPage() {
     setMessages([])
     setIsMuted(false)
     setIsAdmin(false)
+    setIsListener(false)
     setRoomCategory("")
     setAudioTest("")
     setInactivityWarning(false)
@@ -444,7 +443,7 @@ export default function JamWebPage() {
     }
   }, [isInRoom, isAdmin, roomId])
 
-  // ✅ CIERRE AL CERRAR VENTANA (beforeunload)
+  // ✅ CIERRE AL CERRAR VENTANA
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAdmin && roomId) {
@@ -463,7 +462,6 @@ export default function JamWebPage() {
     }
   }, [isAdmin, roomId, user?.id])
 
-  // ✅ CIERRE AL CAMBIAR DE PESTAÑA O CERRAR (visibilitychange)
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden' && isAdmin && roomId) {
@@ -580,7 +578,8 @@ export default function JamWebPage() {
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
-    if (localStreamRef.current) {
+    // ✅ Si no es oyente, añadir stream local
+    if (!isListener && localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!)
       })
@@ -705,6 +704,7 @@ export default function JamWebPage() {
     const newRoomId = crypto.randomUUID()
     setRoomId(newRoomId)
     setIsAdmin(true)
+    setIsListener(false)
     setSelectedCategory(category)
     setRoomCategory(category)
     userIdRef.current = user?.id || `local-${Date.now()}`
@@ -766,6 +766,36 @@ export default function JamWebPage() {
     registerActivity()
   }
 
+  // ✅ UNIRSE COMO OYENTE
+  const joinAsListener = async (sessionId: string) => {
+    if (!user) {
+      alert('Debes iniciar sesión para escuchar')
+      return
+    }
+
+    setIsAdmin(false)
+    setIsListener(true)
+    userIdRef.current = user?.id || `local-${Date.now()}`
+    setRoomId(sessionId)
+    
+    // ✅ No iniciamos el stream local (solo escuchamos)
+    setIsInRoom(true)
+    setView('room')
+    setParticipants([])
+    
+    addMessage("Sistema", `🎧 ${myName} está escuchando la Jam`)
+    subscribeToRoom(sessionId, 'moderna')
+    
+    // ✅ Unirse como oyente (sin micrófono)
+    const session = publicSessions.find(s => s.id === sessionId)
+    if (session) {
+      setRoomName(session.name || sessionId.slice(0, 6))
+      setRoomCategory(session.category || 'moderna')
+    }
+    
+    registerActivity()
+  }
+
   const joinRoom = async (sessionId: string) => {
     if (!selectedInstrument) {
       addMessage("Sistema", "⚠️ Selecciona un instrumento")
@@ -782,6 +812,7 @@ export default function JamWebPage() {
     }
 
     setIsAdmin(false)
+    setIsListener(false)
     userIdRef.current = user?.id || `local-${Date.now()}`
     
     const ok = await startLocalStream()
@@ -867,7 +898,7 @@ export default function JamWebPage() {
             payload: { 
               id: userIdRef.current, 
               name: myName || 'Anónimo',
-              instrument: selectedInstrument,
+              instrument: isListener ? 'Oyente' : selectedInstrument,
               isAdmin: isAdmin
             }
           })
@@ -1084,9 +1115,20 @@ export default function JamWebPage() {
                   </div>
                   <div style={{ display: "flex", gap: "6px" }}>
                     {session.owner_id !== user?.id && (
-                      <button onClick={() => requestToJoin(session.id)} style={{ padding: "6px 14px", background: "#fbbf24", color: "black", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
-                        📩 Solicitar
-                      </button>
+                      <>
+                        <button 
+                          onClick={() => joinAsListener(session.id)} 
+                          style={{ padding: "6px 14px", background: "#8b5cf6", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
+                        >
+                          🎧 Escuchar
+                        </button>
+                        <button 
+                          onClick={() => requestToJoin(session.id)} 
+                          style={{ padding: "6px 14px", background: "#fbbf24", color: "black", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
+                        >
+                          📩 Solicitar
+                        </button>
+                      </>
                     )}
                     <button onClick={() => {
                       setRoomId(session.id)
@@ -1115,6 +1157,7 @@ export default function JamWebPage() {
           <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isAdmin && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑 Admin</span>}
+          {isListener && <span style={{ color: "#8b5cf6", marginLeft: 12 }}>🎧 Oyente</span>}
           {inactivityWarning && isAdmin && (
             <span style={{ marginLeft: 12, color: "#ef4444", fontSize: 12, fontWeight: "bold" }}>⚠️ Cierre por inactividad</span>
           )}
@@ -1127,13 +1170,17 @@ export default function JamWebPage() {
           )}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
-          <button onClick={toggleMonitoring} style={{ padding: "6px 14px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMonitoring ? "🔊" : "🔇"}</button>
-          {isMonitoring && (
-            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 100, accentColor: "#10b981" }} />
-              <span style={{ fontSize: 11, color: "#6b7280", minWidth: 35 }}>{Math.round(monitorVolume * 100)}%</span>
-            </div>
+          {!isListener && (
+            <>
+              <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
+              <button onClick={toggleMonitoring} style={{ padding: "6px 14px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMonitoring ? "🔊" : "🔇"}</button>
+              {isMonitoring && (
+                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                  <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 100, accentColor: "#10b981" }} />
+                  <span style={{ fontSize: 11, color: "#6b7280", minWidth: 35 }}>{Math.round(monitorVolume * 100)}%</span>
+                </div>
+              )}
+            </>
           )}
           {isAdmin && (
             <>
@@ -1189,7 +1236,7 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      {localStreamRef.current && <AudioEffects stream={localStreamRef.current} />}
+      {!isListener && localStreamRef.current && <AudioEffects stream={localStreamRef.current} />}
 
       <div style={{ display: "flex", flexDirection: "column", height: "300px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden", marginTop: "8px" }}>
         <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1212,6 +1259,7 @@ export default function JamWebPage() {
 
       <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>
         💡 {roomId.slice(0, 6)} {isAdmin && '· 🔑 Eres el administrador'}
+        {isListener && '· 🎧 Estás escuchando'}
       </div>
     </div>
   )
