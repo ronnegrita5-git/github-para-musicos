@@ -37,17 +37,176 @@ const getInstrumentEmoji = (instrument: string) => {
   return emojis[instrument] || '🎵'
 }
 
+// ============ EFECTOS DE AUDIO ============
 function AudioEffects({ stream }: { stream: MediaStream | null }) {
-  // ... (mismo código de efectos)
+  const [compressor, setCompressor] = useState({
+    threshold: -24,
+    ratio: 12,
+    attack: 0.003,
+    release: 0.25,
+    gain: 6
+  })
+  
+  const [eq, setEq] = useState({
+    bass: 6,
+    mid: 0,
+    treble: 3
+  })
+  
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const compressorRef = useRef<any>(null)
+  const eqRefs = useRef<any[]>([])
+  const isConnectedRef = useRef(false)
+
+  useEffect(() => {
+    if (!stream) return
+    
+    const setupAudio = async () => {
+      try {
+        if (audioContextRef.current) {
+          await audioContextRef.current.close()
+          audioContextRef.current = null
+          isConnectedRef.current = false
+        }
+        
+        const ctx = new AudioContext()
+        audioContextRef.current = ctx
+        
+        const source = ctx.createMediaStreamSource(stream)
+        
+        const comp = ctx.createDynamicsCompressor()
+        comp.threshold.value = compressor.threshold
+        comp.ratio.value = compressor.ratio
+        comp.attack.value = compressor.attack
+        comp.release.value = compressor.release
+        compressorRef.current = comp
+        
+        const bass = ctx.createBiquadFilter()
+        bass.type = 'lowshelf'
+        bass.frequency.value = 200
+        bass.gain.value = eq.bass
+        
+        const mid = ctx.createBiquadFilter()
+        mid.type = 'peaking'
+        mid.frequency.value = 1000
+        mid.Q.value = 1
+        mid.gain.value = eq.mid
+        
+        const treble = ctx.createBiquadFilter()
+        treble.type = 'highshelf'
+        treble.frequency.value = 5000
+        treble.gain.value = eq.treble
+        
+        eqRefs.current = [bass, mid, treble]
+        
+        source.connect(bass)
+        bass.connect(mid)
+        mid.connect(treble)
+        treble.connect(comp)
+        comp.connect(ctx.destination)
+        
+        isConnectedRef.current = true
+        
+        if (ctx.state === 'suspended') {
+          await ctx.resume()
+        }
+        
+        console.log('🎛️ Efectos de audio activados')
+      } catch (error) {
+        console.error('Error al configurar efectos:', error)
+      }
+    }
+    
+    setupAudio()
+    
+    return () => {
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+        audioContextRef.current = null
+        isConnectedRef.current = false
+      }
+    }
+  }, [stream])
+
+  useEffect(() => {
+    if (compressorRef.current && isConnectedRef.current) {
+      compressorRef.current.threshold.value = compressor.threshold
+      compressorRef.current.ratio.value = compressor.ratio
+      compressorRef.current.attack.value = compressor.attack
+      compressorRef.current.release.value = compressor.release
+    }
+  }, [compressor])
+
+  useEffect(() => {
+    if (eqRefs.current.length === 3 && isConnectedRef.current) {
+      eqRefs.current[0].gain.value = eq.bass
+      eqRefs.current[1].gain.value = eq.mid
+      eqRefs.current[2].gain.value = eq.treble
+    }
+  }, [eq])
+
   if (!stream) return null
-  return <div>Efectos</div>
+
+  return (
+    <div style={{
+      padding: '12px',
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: 8,
+      border: '1px solid rgba(255,255,255,0.05)',
+      marginTop: '8px'
+    }}>
+      <h4 style={{ margin: '0 0 8px 0', color: '#10b981', fontSize: 13 }}>
+        🎛️ Efectos de Audio
+      </h4>
+      
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
+        <div style={{ flex: 1, minWidth: '80px' }}>
+          <label style={{ fontSize: 11, color: '#6b7280' }}>🔊 Bass</label>
+          <input type="range" min="-12" max="12" step="1" value={eq.bass} onChange={(e) => setEq(prev => ({ ...prev, bass: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
+          <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.bass}dB</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '80px' }}>
+          <label style={{ fontSize: 11, color: '#6b7280' }}>🎵 Mid</label>
+          <input type="range" min="-12" max="12" step="1" value={eq.mid} onChange={(e) => setEq(prev => ({ ...prev, mid: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
+          <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.mid}dB</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '80px' }}>
+          <label style={{ fontSize: 11, color: '#6b7280' }}>🔊 Treble</label>
+          <input type="range" min="-12" max="12" step="1" value={eq.treble} onChange={(e) => setEq(prev => ({ ...prev, treble: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
+          <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.treble}dB</span>
+        </div>
+      </div>
+      
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '60px' }}>
+          <label style={{ fontSize: 10, color: '#6b7280' }}>Threshold</label>
+          <input type="range" min="-40" max="0" step="1" value={compressor.threshold} onChange={(e) => setCompressor(prev => ({ ...prev, threshold: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
+          <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.threshold}dB</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '60px' }}>
+          <label style={{ fontSize: 10, color: '#6b7280' }}>Ratio</label>
+          <input type="range" min="1" max="20" step="0.5" value={compressor.ratio} onChange={(e) => setCompressor(prev => ({ ...prev, ratio: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
+          <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.ratio}:1</span>
+        </div>
+        <div style={{ flex: 1, minWidth: '60px' }}>
+          <label style={{ fontSize: 10, color: '#6b7280' }}>Gain</label>
+          <input type="range" min="0" max="20" step="1" value={compressor.gain} onChange={(e) => setCompressor(prev => ({ ...prev, gain: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
+          <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.gain}dB</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
+// ============ COMPONENTE PRINCIPAL ============
 export default function JamWebPage() {
   const { user } = useAuth()
   
+  // Estado de usuario
   const [myName, setMyName] = useState("")
   const [isNameSet, setIsNameSet] = useState(false)
+  
+  // Estado de la sala
   const [roomId, setRoomId] = useState("")
   const [isInRoom, setIsInRoom] = useState(false)
   const [roomName, setRoomName] = useState("")
@@ -56,6 +215,8 @@ export default function JamWebPage() {
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
+  
+  // Estado de la Jam
   const [messages, setMessages] = useState<any[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const [participants, setParticipants] = useState<any[]>([])
@@ -67,8 +228,9 @@ export default function JamWebPage() {
   const [publicSessions, setPublicSessions] = useState<any[]>([])
   const [requests, setRequests] = useState<any[]>([])
   const [showRequests, setShowRequests] = useState(false)
-  const [roomStatus, setRoomStatus] = useState<'active' | 'closing'>('active')
+  const [inactivityWarning, setInactivityWarning] = useState(false)
   
+  // Refs
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
@@ -76,11 +238,16 @@ export default function JamWebPage() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
   
-  // ✅ HEARTBEAT
+  // ✅ TIMERS
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastHeartbeatRef = useRef<number>(Date.now())
+  const lastActivityRef = useRef<number>(Date.now())
+  const inactivityCheckRef = useRef<NodeJS.Timeout | null>(null)
+  
   const HEARTBEAT_INTERVAL = 15000 // 15 segundos
   const HEARTBEAT_TIMEOUT = 45000 // 45 segundos sin heartbeat
+  const INACTIVITY_LIMIT = 10 * 60 * 1000 // 10 minutos
+  const INACTIVITY_WARNING = 9 * 60 * 1000 // 9 minutos (aviso 1 minuto antes)
 
   const PEER_CONFIG = {
     iceServers: [
@@ -91,9 +258,16 @@ export default function JamWebPage() {
 
   const addMessage = (user: string, text: string) => {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
+    registerActivity()
   }
 
-  // ✅ HEARTBEAT: El admin envía "latidos" a la base de datos
+  // ✅ REGISTRAR ACTIVIDAD
+  const registerActivity = () => {
+    lastActivityRef.current = Date.now()
+    setInactivityWarning(false)
+  }
+
+  // ✅ HEARTBEAT: El admin envía "latidos"
   const sendHeartbeat = async () => {
     if (!isAdmin || !roomId) return
     
@@ -114,7 +288,7 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ HEARTBEAT: Verificar si el admin sigue conectado
+  // ✅ VERIFICAR HEARTBEAT
   const checkHeartbeat = async () => {
     if (!isAdmin || !roomId) return
     
@@ -123,6 +297,27 @@ export default function JamWebPage() {
     if (timeSinceLastHeartbeat > HEARTBEAT_TIMEOUT) {
       console.log('⏰ Heartbeat perdido - cerrando sala')
       addMessage("Sistema", "⏰ Sala cerrada por ausencia del administrador")
+      await deleteRoomSilent()
+      leaveRoom()
+    }
+  }
+
+  // ✅ VERIFICAR INACTIVIDAD
+  const checkInactivity = async () => {
+    if (!isAdmin || !roomId) return
+    
+    const timeSinceLastActivity = Date.now() - lastActivityRef.current
+    
+    // Aviso 1 minuto antes
+    if (timeSinceLastActivity > INACTIVITY_WARNING && timeSinceLastActivity < INACTIVITY_LIMIT) {
+      setInactivityWarning(true)
+      addMessage("Sistema", "⚠️ La sala se cerrará en 1 minuto por inactividad")
+    }
+    
+    // Cierre por inactividad
+    if (timeSinceLastActivity > INACTIVITY_LIMIT) {
+      console.log('⏰ Sala cerrada por inactividad (10 minutos)')
+      addMessage("Sistema", "⏰ Sala cerrada por inactividad (10 minutos)")
       await deleteRoomSilent()
       leaveRoom()
     }
@@ -161,6 +356,14 @@ export default function JamWebPage() {
   }
 
   const leaveRoom = async () => {
+    // Guardar que el admin está saliendo
+    if (isAdmin && roomId) {
+      await supabase
+        .from('jam_sessions')
+        .update({ is_active: false })
+        .eq('id', roomId)
+    }
+    
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -180,9 +383,14 @@ export default function JamWebPage() {
       localStreamRef.current = null
     }
     
+    // Limpiar timers
     if (heartbeatIntervalRef.current) {
       clearInterval(heartbeatIntervalRef.current)
       heartbeatIntervalRef.current = null
+    }
+    if (inactivityCheckRef.current) {
+      clearInterval(inactivityCheckRef.current)
+      inactivityCheckRef.current = null
     }
     
     setIsInRoom(false)
@@ -194,50 +402,54 @@ export default function JamWebPage() {
     setIsAdmin(false)
     setRoomCategory("")
     setAudioTest("")
+    setInactivityWarning(false)
     loadPublicSessions()
   }
 
-  // ============ EFECTOS ============
+  // ✅ CONFIGURAR TIMERS DEL ADMIN
   useEffect(() => {
     if (isInRoom && isAdmin) {
-      // ✅ Iniciar heartbeat
+      // Inicializar timers
       lastHeartbeatRef.current = Date.now()
+      lastActivityRef.current = Date.now()
       
-      // Enviar heartbeat inmediatamente
-      sendHeartbeat()
-      
-      // Configurar intervalo de heartbeat
+      // Heartbeat cada 15 segundos
       heartbeatIntervalRef.current = setInterval(() => {
         sendHeartbeat()
       }, HEARTBEAT_INTERVAL)
       
-      // Configurar verificación de heartbeat
-      const checkInterval = setInterval(() => {
+      // Verificar heartbeat cada 10 segundos
+      const heartbeatCheck = setInterval(() => {
         checkHeartbeat()
       }, 10000)
+      
+      // Verificar inactividad cada 30 segundos
+      inactivityCheckRef.current = setInterval(() => {
+        checkInactivity()
+      }, 30000)
       
       return () => {
         if (heartbeatIntervalRef.current) {
           clearInterval(heartbeatIntervalRef.current)
           heartbeatIntervalRef.current = null
         }
-        clearInterval(checkInterval)
+        clearInterval(heartbeatCheck)
+        if (inactivityCheckRef.current) {
+          clearInterval(inactivityCheckRef.current)
+          inactivityCheckRef.current = null
+        }
       }
     }
   }, [isInRoom, isAdmin, roomId])
 
-  // ✅ CERRAR SALA AL CERRAR VENTANA (mejorado)
+  // ✅ CIERRE AL CERRAR VENTANA
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAdmin && roomId) {
-        // Enviar heartbeat de cierre
-        supabase
-          .from('jam_sessions')
-          .update({ is_active: false })
-          .eq('id', roomId)
-          .then(() => {
-            console.log('🚪 Sala marcada como inactiva al cerrar')
-          })
+        navigator.sendBeacon(
+          '/api/jam/close',
+          JSON.stringify({ roomId, userId: user?.id })
+        )
       }
     }
 
@@ -246,7 +458,7 @@ export default function JamWebPage() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [isAdmin, roomId])
+  }, [isAdmin, roomId, user?.id])
 
   // ============ AUDIO ============
   const startLocalStream = async () => {
@@ -523,6 +735,9 @@ export default function JamWebPage() {
     if (isAdmin) {
       loadRequests(newRoomId)
     }
+    
+    // ✅ Registrar actividad inicial
+    registerActivity()
   }
 
   const joinRoom = async (sessionId: string) => {
@@ -556,6 +771,8 @@ export default function JamWebPage() {
     }])
     addMessage("Sistema", `🎵 ${myName} se unió`)
     subscribeToRoom(sessionId, session?.category || 'moderna')
+    
+    registerActivity()
   }
 
   const subscribeToRoom = (roomId: string, category: string) => {
@@ -585,30 +802,36 @@ export default function JamWebPage() {
             createOffer(payload.id)
           }
         }, 1000)
+        registerActivity()
       })
       .on('broadcast', { event: 'user-left' }, ({ payload }) => {
         addMessage("Sistema", `👤 ${payload.name} salió`)
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
         const pc = peerConnectionsRef.current.get(payload.id)
         if (pc) { pc.close(); peerConnectionsRef.current.delete(payload.id) }
+        registerActivity()
       })
       .on('broadcast', { event: 'offer' }, ({ payload }) => {
         if (payload.targetId === userIdRef.current) {
           handleOffer(payload.fromId, payload.offer)
         }
+        registerActivity()
       })
       .on('broadcast', { event: 'answer' }, ({ payload }) => {
         if (payload.targetId === userIdRef.current) {
           handleAnswer(payload.fromId, payload.answer)
         }
+        registerActivity()
       })
       .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
         if (payload.targetId === userIdRef.current) {
           handleIceCandidate(payload.fromId, payload.candidate)
         }
+        registerActivity()
       })
       .on('broadcast', { event: 'message' }, ({ payload }) => {
         addMessage(payload.user, payload.text)
+        registerActivity()
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -636,6 +859,7 @@ export default function JamWebPage() {
         addMessage("Sistema", isMuted ? "🎤 Micrófono activado" : "🔇 Micrófono desactivado")
       }
     }
+    registerActivity()
   }
 
   const sendMessage = () => {
@@ -654,6 +878,7 @@ export default function JamWebPage() {
     
     addMessage(myName || user?.email || 'Anónimo', inputMessage)
     setInputMessage("")
+    registerActivity()
   }
 
   // ============ SOLICITUDES ============
@@ -772,6 +997,7 @@ export default function JamWebPage() {
     )
   }
 
+  // ============ VISTA DE EXPLORACIÓN ============
   if (view === 'browse') {
     return (
       <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "20px", maxWidth: "800px", margin: "0 auto" }}>
@@ -827,7 +1053,7 @@ export default function JamWebPage() {
                   <div>
                     <div style={{ fontWeight: "bold", color: "white" }}>{session.name || session.id.slice(0, 6)}</div>
                     <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      👤 {session.owner_id?.slice(0, 8) || 'Anónimo'} · 🎵 {session.category || 'Sin categoría'} · 👥 {session.max_participants || 10}
+                      👤 {session.owner_id?.slice(0, 8) || 'Anónimo'} · 🎵 {session.category || 'Sin categoría'}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: "6px" }}>
@@ -863,6 +1089,9 @@ export default function JamWebPage() {
           <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isAdmin && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑 Admin</span>}
+          {inactivityWarning && isAdmin && (
+            <span style={{ marginLeft: 12, color: "#ef4444", fontSize: 12, fontWeight: "bold" }}>⚠️ Cierre por inactividad</span>
+          )}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
           {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 {Math.round(monitorVolume * 100)}%</span>}
           {isAdmin && requests.length > 0 && (
@@ -881,9 +1110,23 @@ export default function JamWebPage() {
             </div>
           )}
           {isAdmin && (
-            <button onClick={deleteRoom} style={{ padding: "6px 14px", background: "#ef4444", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: "bold" }}>
-              🗑️ Eliminar
-            </button>
+            <>
+              <button 
+                onClick={deleteRoom} 
+                style={{ padding: "6px 14px", background: "#ef4444", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: "bold" }}
+              >
+                🗑️ Eliminar
+              </button>
+              <button 
+                onClick={() => {
+                  registerActivity()
+                  addMessage("Sistema", "🔄 Actividad registrada")
+                }} 
+                style={{ padding: "6px 14px", background: "rgba(16,185,129,0.1)", color: "#10b981", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}
+              >
+                🔄 Mantener activa
+              </button>
+            </>
           )}
           <button onClick={leaveRoom} style={{ padding: "6px 14px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>✕</button>
         </div>
