@@ -202,27 +202,34 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
 export default function JamWebPage() {
   const { user } = useAuth()
   
+  // Estado de usuario
+  const [myName, setMyName] = useState("")
+  const [isNameSet, setIsNameSet] = useState(false)
+  
+  // Estado de la sala
   const [roomId, setRoomId] = useState("")
   const [isInRoom, setIsInRoom] = useState(false)
   const [roomName, setRoomName] = useState("")
   const [visibility, setVisibility] = useState<'public' | 'private'>('public')
   const [isAdmin, setIsAdmin] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
+  const [selectedInstrument, setSelectedInstrument] = useState<string>("")
+  const [roomCategory, setRoomCategory] = useState<string>("")
   
+  // Estado de la Jam
   const [messages, setMessages] = useState<any[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const [participants, setParticipants] = useState<any[]>([])
   const [isMuted, setIsMuted] = useState(false)
-  const [myName, setMyName] = useState("")
-  const [isNameSet, setIsNameSet] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
-  const [selectedInstrument, setSelectedInstrument] = useState<string>("")
-  const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
   const [isMonitoring, setIsMonitoring] = useState(false)
   const [monitorVolume, setMonitorVolume] = useState(1.0)
   const [view, setView] = useState<'browse' | 'room'>('browse')
   const [publicSessions, setPublicSessions] = useState<any[]>([])
+  const [requests, setRequests] = useState<any[]>([])
+  const [showRequests, setShowRequests] = useState(false)
   
+  // Refs
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
@@ -236,9 +243,6 @@ export default function JamWebPage() {
       { urls: 'stun:stun1.l.google.com:19302' },
     ]
   }
-
-  // ✅ GENERAR UUID EN LUGAR DE ID CORTO
-  const generateRoomId = () => crypto.randomUUID()
 
   const addMessage = (user: string, text: string) => {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
@@ -263,6 +267,75 @@ export default function JamWebPage() {
       setPublicSessions(data || [])
     } catch (error) {
       console.error('Error cargando sesiones:', error)
+    }
+  }
+
+  // ============ SOLICITUDES ============
+  const loadRequests = async (jamId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('jam_requests')
+        .select('*')
+        .eq('jam_id', jamId)
+        .eq('status', 'pending')
+
+      if (error) throw error
+      setRequests(data || [])
+    } catch (error) {
+      console.error('Error cargando solicitudes:', error)
+    }
+  }
+
+  const requestToJoin = async (sessionId: string) => {
+    if (!user) {
+      alert('Debes iniciar sesión')
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('jam_requests')
+        .insert({
+          jam_id: sessionId,
+          user_id: user.id,
+          user_name: myName || user.email,
+          instrument: selectedInstrument || 'Sin instrumento',
+          status: 'pending'
+        })
+
+      if (error) throw error
+      alert('✅ Solicitud enviada al administrador')
+    } catch (error) {
+      console.error('Error:', error)
+      alert('❌ Error al enviar solicitud')
+    }
+  }
+
+  const approveRequest = async (requestId: string, jamId: string) => {
+    try {
+      await supabase
+        .from('jam_requests')
+        .update({ status: 'approved' })
+        .eq('id', requestId)
+      
+      loadRequests(jamId)
+      addMessage("Sistema", "✅ Solicitud aceptada")
+    } catch (error) {
+      console.error('Error:', error)
+    }
+  }
+
+  const rejectRequest = async (requestId: string, jamId: string) => {
+    try {
+      await supabase
+        .from('jam_requests')
+        .update({ status: 'rejected' })
+        .eq('id', requestId)
+      
+      loadRequests(jamId)
+      addMessage("Sistema", "❌ Solicitud rechazada")
+    } catch (error) {
+      console.error('Error:', error)
     }
   }
 
@@ -332,7 +405,7 @@ export default function JamWebPage() {
   const disableMonitoring = async () => {
     try {
       if (audioContextRef.current) {
-        await audioContextRef.current.close()
+        audioContextRef.current.close()
         audioContextRef.current = null
         monitorGainRef.current = null
         setIsMonitoring(false)
@@ -487,7 +560,6 @@ export default function JamWebPage() {
       return
     }
 
-    // ✅ USAR UUID EN LUGAR DE ID CORTO
     const newRoomId = crypto.randomUUID()
     setRoomId(newRoomId)
     setIsAdmin(true)
@@ -499,7 +571,7 @@ export default function JamWebPage() {
     if (!ok) return
     
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('jam_sessions')
         .insert({
           id: newRoomId,
@@ -512,16 +584,14 @@ export default function JamWebPage() {
           max_participants: 10,
           created_at: new Date().toISOString()
         })
-        .select()
-        .single()
 
       if (error) {
         console.error('Error guardando sala:', error)
-        addMessage("Sistema", `⚠️ Error al guardar la sala: ${error.message}`)
+        addMessage("Sistema", `⚠️ Error: ${error.message}`)
         return
       }
       
-      addMessage("Sistema", `✅ Sala guardada correctamente`)
+      addMessage("Sistema", `✅ Sala guardada`)
     } catch (error: any) {
       console.error('Error:', error)
       addMessage("Sistema", `⚠️ Error: ${error.message}`)
@@ -537,17 +607,27 @@ export default function JamWebPage() {
       isAdmin: true
     }])
     
-    addMessage("Sistema", `👑 ${myName} creó la sala ${newRoomId.slice(0, 6)} (${visibility})`)
+    addMessage("Sistema", `👑 ${myName} creó la sala (${visibility})`)
     subscribeToRoom(newRoomId, category)
+    
+    if (isAdmin) {
+      loadRequests(newRoomId)
+    }
   }
 
   const joinRoom = async (sessionId: string) => {
-    if (!roomId.trim()) {
-      addMessage("Sistema", "⚠️ Introduce un código de sala")
-      return
-    }
     if (!selectedInstrument) {
       addMessage("Sistema", "⚠️ Selecciona un instrumento")
+      return
+    }
+
+    // Verificar si es privada y necesita solicitud
+    const session = publicSessions.find(s => s.id === sessionId)
+    if (session && session.visibility === 'private') {
+      const confirmJoin = confirm('Esta sala es privada. ¿Quieres solicitar unión al administrador?')
+      if (confirmJoin) {
+        await requestToJoin(sessionId)
+      }
       return
     }
 
@@ -565,8 +645,8 @@ export default function JamWebPage() {
       instrument: selectedInstrument,
       isAdmin: false
     }])
-    addMessage("Sistema", `🎵 ${myName} se unió a la sala`)
-    subscribeToRoom(roomId, selectedCategory || 'moderna')
+    addMessage("Sistema", `🎵 ${myName} se unió`)
+    subscribeToRoom(sessionId, session?.category || 'moderna')
   }
 
   const subscribeToRoom = (roomId: string, category: string) => {
@@ -679,8 +759,6 @@ export default function JamWebPage() {
     setMessages([])
     setIsMuted(false)
     setIsAdmin(false)
-    setSelectedCategory(null)
-    setSelectedInstrument("")
     setRoomCategory("")
     setAudioTest("")
     loadPublicSessions()
@@ -696,12 +774,14 @@ export default function JamWebPage() {
     )
   }
 
+  // ✅ PANTALLA DE NOMBRE (SOLO UNA VEZ)
   if (!isNameSet) {
     return (
       <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white", alignItems: "center", justifyContent: "center", padding: "20px" }}>
         <div style={{ maxWidth: 400, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", textAlign: "center" }}>
           <h1 style={{ fontSize: 48, marginBottom: 8 }}>🎵</h1>
           <h2 style={{ marginBottom: 24 }}>Jam Session</h2>
+          <p style={{ color: "#6b7280", marginBottom: 16 }}>Introduce tu nombre para la Jam</p>
           <input type="text" value={myName} onChange={(e) => setMyName(e.target.value)} placeholder="Tu nombre" style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 16, marginBottom: 16 }} onKeyPress={(e) => e.key === "Enter" && myName.trim() && setIsNameSet(true)} />
           <button onClick={() => { if (myName.trim()) setIsNameSet(true) }} disabled={!myName.trim()} style={{ width: "100%", padding: "14px", background: myName.trim() ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: myName.trim() ? "pointer" : "not-allowed" }}>Entrar</button>
         </div>
@@ -763,19 +843,26 @@ export default function JamWebPage() {
               <div key={session.id} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "12px 16px", border: "1px solid rgba(255,255,255,0.05)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
                   <div>
-                    <div style={{ fontWeight: "bold", color: "white" }}>{session.name || session.id}</div>
+                    <div style={{ fontWeight: "bold", color: "white" }}>{session.name || session.id.slice(0, 6)}</div>
                     <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      👤 {session.owner_id || 'Anónimo'} · 🎵 {session.category || 'Sin categoría'}
+                      👤 {session.owner_id?.slice(0, 8) || 'Anónimo'} · 🎵 {session.category || 'Sin categoría'} · 👥 {session.max_participants || 10}
                     </div>
                   </div>
-                  <button onClick={() => {
-                    setRoomId(session.id)
-                    setRoomCategory(session.category || 'moderna')
-                    setSelectedCategory(session.category as CategoryKey || 'moderna')
-                    joinRoom(session.id)
-                  }} style={{ padding: "6px 14px", background: "#3b82f6", color: "white", border: "none", borderRadius: 6, cursor: "pointer" }}>
-                    Unirse
-                  </button>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    {session.owner_id !== user?.id && (
+                      <button onClick={() => requestToJoin(session.id)} style={{ padding: "6px 14px", background: "#fbbf24", color: "black", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                        📩 Solicitar
+                      </button>
+                    )}
+                    <button onClick={() => {
+                      setRoomId(session.id)
+                      setRoomCategory(session.category || 'moderna')
+                      setSelectedCategory(session.category as CategoryKey || 'moderna')
+                      joinRoom(session.id)
+                    }} style={{ padding: "6px 14px", background: "#10b981", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                      Unirse
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -790,12 +877,17 @@ export default function JamWebPage() {
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "16px", maxWidth: "800px", margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", flexWrap: "wrap", gap: "8px" }}>
         <div>
-          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 Sala</span>
+          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 {roomName || 'Sala'}</span>
           <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isAdmin && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑 Admin</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
           {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 {Math.round(monitorVolume * 100)}%</span>}
+          {isAdmin && requests.length > 0 && (
+            <button onClick={() => setShowRequests(!showRequests)} style={{ marginLeft: 12, padding: "2px 10px", background: "#fbbf24", color: "black", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 11 }}>
+              📩 {requests.length}
+            </button>
+          )}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
@@ -809,6 +901,22 @@ export default function JamWebPage() {
           <button onClick={leaveRoom} style={{ padding: "6px 14px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>✕</button>
         </div>
       </div>
+
+      {/* Solicitudes pendientes (solo admin) */}
+      {isAdmin && showRequests && requests.length > 0 && (
+        <div style={{ background: "rgba(251,191,36,0.1)", borderRadius: 8, padding: "12px", border: "1px solid rgba(251,191,36,0.2)", marginBottom: "12px" }}>
+          <h4 style={{ margin: "0 0 8px 0", color: "#fbbf24", fontSize: 14 }}>📩 Solicitudes pendientes</h4>
+          {requests.map((req) => (
+            <div key={req.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+              <span style={{ fontSize: 13 }}>{req.user_name} - {req.instrument}</span>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button onClick={() => approveRequest(req.id, req.jam_id)} style={{ padding: "2px 12px", background: "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>✅</button>
+                <button onClick={() => rejectRequest(req.id, req.jam_id)} style={{ padding: "2px 12px", background: "#ef4444", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>❌</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "12px", border: "1px solid rgba(255,255,255,0.05)", marginBottom: "12px" }}>
         <h3 style={{ margin: "0 0 8px 0", color: "#9ca3af", fontSize: 14 }}>🎵 Participantes</h3>
@@ -847,7 +955,7 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId.slice(0, 6)}</strong></div>
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 {roomId.slice(0, 6)}</div>
     </div>
   )
 }
