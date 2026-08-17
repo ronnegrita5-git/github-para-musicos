@@ -202,14 +202,12 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
 export default function JamWebPage() {
   const { user } = useAuth()
   
-  // Estado de la sala
   const [roomId, setRoomId] = useState("")
   const [isInRoom, setIsInRoom] = useState(false)
   const [roomName, setRoomName] = useState("")
   const [visibility, setVisibility] = useState<'public' | 'private'>('public')
   const [isAdmin, setIsAdmin] = useState(false)
   
-  // Estado de la Jam
   const [messages, setMessages] = useState<any[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const [participants, setParticipants] = useState<any[]>([])
@@ -225,7 +223,6 @@ export default function JamWebPage() {
   const [view, setView] = useState<'browse' | 'room'>('browse')
   const [publicSessions, setPublicSessions] = useState<any[]>([])
   
-  // Refs
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
@@ -240,7 +237,8 @@ export default function JamWebPage() {
     ]
   }
 
-  const generateRoomId = () => Math.random().toString(36).substring(2, 8).toUpperCase()
+  // ✅ GENERAR UUID EN LUGAR DE ID CORTO
+  const generateRoomId = () => crypto.randomUUID()
 
   const addMessage = (user: string, text: string) => {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
@@ -489,7 +487,8 @@ export default function JamWebPage() {
       return
     }
 
-    const newRoomId = generateRoomId()
+    // ✅ USAR UUID EN LUGAR DE ID CORTO
+    const newRoomId = crypto.randomUUID()
     setRoomId(newRoomId)
     setIsAdmin(true)
     setSelectedCategory(category)
@@ -499,16 +498,18 @@ export default function JamWebPage() {
     const ok = await startLocalStream()
     if (!ok) return
     
-    // Guardar sala en la base de datos
     try {
       const { data, error } = await supabase
         .from('jam_sessions')
         .insert({
           id: newRoomId,
-          name: roomName || `Jam ${newRoomId}`,
+          name: roomName || `Jam ${newRoomId.slice(0, 6)}`,
           visibility: visibility,
           owner_id: user?.id,
           category: category,
+          instrument: selectedInstrument,
+          description: `Sala de ${category}`,
+          max_participants: 10,
           created_at: new Date().toISOString()
         })
         .select()
@@ -516,10 +517,15 @@ export default function JamWebPage() {
 
       if (error) {
         console.error('Error guardando sala:', error)
-        addMessage("Sistema", "⚠️ Error al guardar la sala")
+        addMessage("Sistema", `⚠️ Error al guardar la sala: ${error.message}`)
+        return
       }
-    } catch (error) {
+      
+      addMessage("Sistema", `✅ Sala guardada correctamente`)
+    } catch (error: any) {
       console.error('Error:', error)
+      addMessage("Sistema", `⚠️ Error: ${error.message}`)
+      return
     }
     
     setIsInRoom(true)
@@ -531,7 +537,7 @@ export default function JamWebPage() {
       isAdmin: true
     }])
     
-    addMessage("Sistema", `👑 ${myName} creó la sala ${newRoomId} (${visibility})`)
+    addMessage("Sistema", `👑 ${myName} creó la sala ${newRoomId.slice(0, 6)} (${visibility})`)
     subscribeToRoom(newRoomId, category)
   }
 
@@ -559,7 +565,7 @@ export default function JamWebPage() {
       instrument: selectedInstrument,
       isAdmin: false
     }])
-    addMessage("Sistema", `🎵 ${myName} se unió a ${roomId}`)
+    addMessage("Sistema", `🎵 ${myName} se unió a la sala`)
     subscribeToRoom(roomId, selectedCategory || 'moderna')
   }
 
@@ -710,7 +716,6 @@ export default function JamWebPage() {
         <h1 style={{ fontSize: 32, marginBottom: 8 }}>🎵 Jam Sessions</h1>
         <p style={{ color: "#6b7280", marginBottom: 20 }}>Encuentra salas públicas o crea tu propia Jam</p>
 
-        {/* Crear sala */}
         <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "16px", border: "1px solid rgba(255,255,255,0.05)", marginBottom: "20px" }}>
           <h3 style={{ margin: "0 0 12px 0", color: "#10b981", fontSize: 16 }}>🎸 Crear nueva Jam</h3>
           
@@ -748,7 +753,6 @@ export default function JamWebPage() {
           </button>
         </div>
 
-        {/* Lista de salas públicas */}
         <h3 style={{ margin: "0 0 12px 0", color: "#9ca3af", fontSize: 16 }}>🌍 Salas públicas</h3>
         
         {publicSessions.length === 0 ? (
@@ -784,10 +788,9 @@ export default function JamWebPage() {
   // ============ SALA ACTIVA ============
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "16px", maxWidth: "800px", margin: "0 auto" }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", flexWrap: "wrap", gap: "8px" }}>
         <div>
-          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 {roomId}</span>
+          <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 Sala</span>
           <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isAdmin && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑 Admin</span>}
@@ -807,7 +810,6 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      {/* Participantes */}
       <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "12px", border: "1px solid rgba(255,255,255,0.05)", marginBottom: "12px" }}>
         <h3 style={{ margin: "0 0 8px 0", color: "#9ca3af", fontSize: 14 }}>🎵 Participantes</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -824,10 +826,8 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      {/* Efectos de audio */}
       {localStreamRef.current && <AudioEffects stream={localStreamRef.current} />}
 
-      {/* Chat */}
       <div style={{ display: "flex", flexDirection: "column", height: "300px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden", marginTop: "8px" }}>
         <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ color: "#9ca3af", fontWeight: "bold" }}>💬 Chat</span>
@@ -847,7 +847,7 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId}</strong></div>
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 Código: <strong>{roomId.slice(0, 6)}</strong></div>
     </div>
   )
 }
