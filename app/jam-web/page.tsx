@@ -229,6 +229,11 @@ export default function JamWebPage() {
   const [requests, setRequests] = useState<any[]>([])
   const [showRequests, setShowRequests] = useState(false)
   
+  // ✅ TIMER DE INACTIVIDAD
+  const [inactivityTimer, setInactivityTimer] = useState<NodeJS.Timeout | null>(null)
+  const [activityWarning, setActivityWarning] = useState(false)
+  const INACTIVITY_LIMIT = 5 * 60 * 1000 // 5 minutos
+  
   // Refs
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -236,6 +241,8 @@ export default function JamWebPage() {
   const userIdRef = useRef<string>("")
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
+  const lastActivityRef = useRef<number>(Date.now())
+  const inactivityCheckInterval = useRef<NodeJS.Timeout | null>(null)
 
   const PEER_CONFIG = {
     iceServers: [
@@ -246,6 +253,101 @@ export default function JamWebPage() {
 
   const addMessage = (user: string, text: string) => {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
+  }
+
+  // ✅ REGISTRAR ACTIVIDAD
+  const registerActivity = () => {
+    lastActivityRef.current = Date.now()
+    setActivityWarning(false)
+  }
+
+  // ✅ VERIFICAR INACTIVIDAD (solo para el admin/dueno)
+  useEffect(() => {
+    if (isInRoom && isAdmin) {
+      // Reiniciar timer de inactividad
+      if (inactivityCheckInterval.current) {
+        clearInterval(inactivityCheckInterval.current)
+      }
+      
+      inactivityCheckInterval.current = setInterval(() => {
+        const timeSinceLastActivity = Date.now() - lastActivityRef.current
+        
+        if (timeSinceLastActivity > INACTIVITY_LIMIT) {
+          // 5 minutos sin actividad → cerrar sala
+          addMessage("Sistema", "⏰ Sala cerrada por inactividad (5 minutos)")
+          deleteRoom()
+        } else if (timeSinceLastActivity > INACTIVITY_LIMIT - 30000) {
+          // 30 segundos antes del cierre, mostrar advertencia
+          setActivityWarning(true)
+          addMessage("Sistema", "⚠️ La sala se cerrará en 30 segundos por inactividad")
+        }
+      }, 10000) // Verificar cada 10 segundos
+      
+      return () => {
+        if (inactivityCheckInterval.current) {
+          clearInterval(inactivityCheckInterval.current)
+          inactivityCheckInterval.current = null
+        }
+      }
+    }
+  }, [isInRoom, isAdmin])
+
+  // ✅ CIERRE AUTOMÁTICO AL CERRAR VENTANA (solo admin)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isInRoom && isAdmin) {
+        // Enviar evento de cierre antes de salir
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'room-closed',
+            payload: { adminId: userIdRef.current }
+          })
+        }
+        // Eliminar sala de la base de datos
+        deleteRoomSilent()
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [isInRoom, isAdmin])
+
+  // ✅ FUNCIÓN PARA ELIMINAR SALA (con confirmación)
+  const deleteRoom = async () => {
+    if (!isAdmin || !roomId) return
+    
+    if (confirm('⚠️ ¿Eliminar esta sala permanentemente? Se desconectarán todos los participantes.')) {
+      await deleteRoomSilent()
+      leaveRoom()
+    }
+  }
+
+  const deleteRoomSilent = async () => {
+    try {
+      await supabase
+        .from('jam_sessions')
+        .delete()
+        .eq('id', roomId)
+      
+      // Eliminar también solicitudes y miembros asociados
+      await supabase
+        .from('jam_requests')
+        .delete()
+        .eq('jam_id', roomId)
+      
+      await supabase
+        .from('jam_members')
+        .delete()
+        .eq('jam_id', roomId)
+      
+      console.log('🗑️ Sala eliminada:', roomId)
+    } catch (error) {
+      console.error('Error eliminando sala:', error)
+    }
   }
 
   // ============ CARGAR SALAS PÚBLICAS ============
@@ -613,6 +715,9 @@ export default function JamWebPage() {
     if (isAdmin) {
       loadRequests(newRoomId)
     }
+    
+    // ✅ Registrar actividad inicial
+    registerActivity()
   }
 
   const joinRoom = async (sessionId: string) => {
@@ -621,7 +726,6 @@ export default function JamWebPage() {
       return
     }
 
-    // Verificar si es privada y necesita solicitud
     const session = publicSessions.find(s => s.id === sessionId)
     if (session && session.visibility === 'private') {
       const confirmJoin = confirm('Esta sala es privada. ¿Quieres solicitar unión al administrador?')
@@ -647,6 +751,9 @@ export default function JamWebPage() {
     }])
     addMessage("Sistema", `🎵 ${myName} se unió`)
     subscribeToRoom(sessionId, session?.category || 'moderna')
+    
+    // ✅ Registrar actividad
+    registerActivity()
   }
 
   const subscribeToRoom = (roomId: string, category: string) => {
@@ -676,27 +783,36 @@ export default function JamWebPage() {
             createOffer(payload.id)
           }
         }, 1000)
+        registerActivity()
       })
       .on('broadcast', { event: 'user-left' }, ({ payload }) => {
         addMessage("Sistema", `👤 ${payload.name} salió`)
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
         const pc = peerConnectionsRef.current.get(payload.id)
         if (pc) { pc.close(); peerConnectionsRef.current.delete(payload.id) }
+        registerActivity()
       })
       .on('broadcast', { event: 'offer' }, ({ payload }) => {
         if (payload.targetId === userIdRef.current) {
           handleOffer(payload.fromId, payload.offer)
         }
+        registerActivity()
       })
       .on('broadcast', { event: 'answer' }, ({ payload }) => {
         if (payload.targetId === userIdRef.current) {
           handleAnswer(payload.fromId, payload.answer)
         }
+        registerActivity()
       })
       .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
         if (payload.targetId === userIdRef.current) {
           handleIceCandidate(payload.fromId, payload.candidate)
         }
+        registerActivity()
+      })
+      .on('broadcast', { event: 'message' }, ({ payload }) => {
+        addMessage(payload.user, payload.text)
+        registerActivity()
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -715,6 +831,26 @@ export default function JamWebPage() {
       })
   }
 
+  const sendMessage = () => {
+    if (!inputMessage.trim()) return
+    
+    // Enviar por broadcast
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'message',
+        payload: {
+          user: myName || user?.email || 'Anónimo',
+          text: inputMessage.trim()
+        }
+      })
+    }
+    
+    addMessage(myName || user?.email || 'Anónimo', inputMessage)
+    setInputMessage("")
+    registerActivity()
+  }
+
   const toggleMute = () => {
     if (localStreamRef.current) {
       const track = localStreamRef.current.getAudioTracks()[0]
@@ -724,12 +860,7 @@ export default function JamWebPage() {
         addMessage("Sistema", isMuted ? "🎤 Micrófono activado" : "🔇 Micrófono desactivado")
       }
     }
-  }
-
-  const sendMessage = () => {
-    if (!inputMessage.trim()) return
-    addMessage(myName || user?.email || 'Anónimo', inputMessage)
-    setInputMessage("")
+    registerActivity()
   }
 
   const leaveRoom = async () => {
@@ -752,6 +883,12 @@ export default function JamWebPage() {
       localStreamRef.current = null
     }
     
+    // Limpiar timers
+    if (inactivityCheckInterval.current) {
+      clearInterval(inactivityCheckInterval.current)
+      inactivityCheckInterval.current = null
+    }
+    
     setIsInRoom(false)
     setView('browse')
     setRoomId("")
@@ -761,6 +898,7 @@ export default function JamWebPage() {
     setIsAdmin(false)
     setRoomCategory("")
     setAudioTest("")
+    setActivityWarning(false)
     loadPublicSessions()
   }
 
@@ -881,6 +1019,9 @@ export default function JamWebPage() {
           <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isAdmin && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑 Admin</span>}
+          {activityWarning && isAdmin && (
+            <span style={{ marginLeft: 12, color: "#ef4444", fontSize: 12, fontWeight: "bold" }}>⚠️ Cierre por inactividad</span>
+          )}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
           {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 {Math.round(monitorVolume * 100)}%</span>}
           {isAdmin && requests.length > 0 && (
@@ -897,6 +1038,19 @@ export default function JamWebPage() {
               <input type="range" min="0" max="2" step="0.01" value={monitorVolume} onChange={(e) => updateMonitorVolume(parseFloat(e.target.value))} style={{ width: 100, accentColor: "#10b981" }} />
               <span style={{ fontSize: 11, color: "#6b7280", minWidth: 35 }}>{Math.round(monitorVolume * 100)}%</span>
             </div>
+          )}
+          {isAdmin && (
+            <>
+              <button onClick={deleteRoom} style={{ padding: "6px 14px", background: "#ef4444", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: "bold" }}>
+                🗑️ Eliminar
+              </button>
+              <button onClick={() => {
+                registerActivity()
+                addMessage("Sistema", "🔄 Actividad registrada")
+              }} style={{ padding: "6px 14px", background: "rgba(16,185,129,0.1)", color: "#10b981", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                🔄 Mantener activa
+              </button>
+            </>
           )}
           <button onClick={leaveRoom} style={{ padding: "6px 14px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>✕</button>
         </div>
@@ -955,7 +1109,9 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>💡 {roomId.slice(0, 6)}</div>
+      <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>
+        💡 {roomId.slice(0, 6)} {isAdmin && '· 🔑 Eres el administrador'}
+      </div>
     </div>
   )
 }
