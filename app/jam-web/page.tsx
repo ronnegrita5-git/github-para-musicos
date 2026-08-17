@@ -341,6 +341,12 @@ export default function JamWebPage() {
         .delete()
         .eq('jam_id', roomId)
       
+      // ✅ Limpiar sessionStorage
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('jamRoomId')
+        sessionStorage.removeItem('jamIsAdmin')
+      }
+      
       console.log('🗑️ Sala eliminada:', roomId)
     } catch (error) {
       console.error('Error eliminando sala:', error)
@@ -391,6 +397,12 @@ export default function JamWebPage() {
     if (inactivityCheckRef.current) {
       clearInterval(inactivityCheckRef.current)
       inactivityCheckRef.current = null
+    }
+    
+    // ✅ Limpiar sessionStorage
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('jamRoomId')
+      sessionStorage.removeItem('jamIsAdmin')
     }
     
     setIsInRoom(false)
@@ -686,6 +698,12 @@ export default function JamWebPage() {
     setSelectedCategory(category)
     setRoomCategory(category)
     userIdRef.current = user?.id || `local-${Date.now()}`
+    
+    // ✅ Guardar en sessionStorage para el cierre de sesión
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('jamRoomId', newRoomId)
+      sessionStorage.setItem('jamIsAdmin', 'true')
+    }
     
     const ok = await startLocalStream()
     if (!ok) return
