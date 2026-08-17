@@ -37,7 +37,7 @@ const getInstrumentEmoji = (instrument: string) => {
   return emojis[instrument] || '🎵'
 }
 
-// ✅ COMPONENTE DE EFECTOS DE AUDIO
+// ============ EFECTOS DE AUDIO ============
 function AudioEffects({ stream }: { stream: MediaStream | null }) {
   const [compressor, setCompressor] = useState({
     threshold: -24,
@@ -63,7 +63,6 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
     
     const setupAudio = async () => {
       try {
-        // Cerrar contexto anterior si existe
         if (audioContextRef.current) {
           await audioContextRef.current.close()
           audioContextRef.current = null
@@ -75,7 +74,6 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
         
         const source = ctx.createMediaStreamSource(stream)
         
-        // ✅ COMPRESOR
         const comp = ctx.createDynamicsCompressor()
         comp.threshold.value = compressor.threshold
         comp.ratio.value = compressor.ratio
@@ -83,20 +81,17 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
         comp.release.value = compressor.release
         compressorRef.current = comp
         
-        // ✅ EQ: Bass (lowshelf)
         const bass = ctx.createBiquadFilter()
         bass.type = 'lowshelf'
         bass.frequency.value = 200
         bass.gain.value = eq.bass
         
-        // ✅ EQ: Mid (peaking)
         const mid = ctx.createBiquadFilter()
         mid.type = 'peaking'
         mid.frequency.value = 1000
         mid.Q.value = 1
         mid.gain.value = eq.mid
         
-        // ✅ EQ: Treble (highshelf)
         const treble = ctx.createBiquadFilter()
         treble.type = 'highshelf'
         treble.frequency.value = 5000
@@ -104,7 +99,6 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
         
         eqRefs.current = [bass, mid, treble]
         
-        // ✅ Conectar: source → EQ → compressor → destination
         source.connect(bass)
         bass.connect(mid)
         mid.connect(treble)
@@ -134,7 +128,6 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
     }
   }, [stream])
 
-  // ✅ Actualizar compresor en tiempo real
   useEffect(() => {
     if (compressorRef.current && isConnectedRef.current) {
       compressorRef.current.threshold.value = compressor.threshold
@@ -144,7 +137,6 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
     }
   }, [compressor])
 
-  // ✅ Actualizar EQ en tiempo real
   useEffect(() => {
     if (eqRefs.current.length === 3 && isConnectedRef.current) {
       eqRefs.current[0].gain.value = eq.bass
@@ -167,88 +159,38 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
         🎛️ Efectos de Audio
       </h4>
       
-      {/* EQ */}
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
         <div style={{ flex: 1, minWidth: '80px' }}>
           <label style={{ fontSize: 11, color: '#6b7280' }}>🔊 Bass</label>
-          <input
-            type="range"
-            min="-12"
-            max="12"
-            step="1"
-            value={eq.bass}
-            onChange={(e) => setEq(prev => ({ ...prev, bass: Number(e.target.value) }))}
-            style={{ width: '100%', accentColor: '#10b981' }}
-          />
+          <input type="range" min="-12" max="12" step="1" value={eq.bass} onChange={(e) => setEq(prev => ({ ...prev, bass: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
           <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.bass}dB</span>
         </div>
         <div style={{ flex: 1, minWidth: '80px' }}>
           <label style={{ fontSize: 11, color: '#6b7280' }}>🎵 Mid</label>
-          <input
-            type="range"
-            min="-12"
-            max="12"
-            step="1"
-            value={eq.mid}
-            onChange={(e) => setEq(prev => ({ ...prev, mid: Number(e.target.value) }))}
-            style={{ width: '100%', accentColor: '#10b981' }}
-          />
+          <input type="range" min="-12" max="12" step="1" value={eq.mid} onChange={(e) => setEq(prev => ({ ...prev, mid: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
           <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.mid}dB</span>
         </div>
         <div style={{ flex: 1, minWidth: '80px' }}>
           <label style={{ fontSize: 11, color: '#6b7280' }}>🔊 Treble</label>
-          <input
-            type="range"
-            min="-12"
-            max="12"
-            step="1"
-            value={eq.treble}
-            onChange={(e) => setEq(prev => ({ ...prev, treble: Number(e.target.value) }))}
-            style={{ width: '100%', accentColor: '#10b981' }}
-          />
+          <input type="range" min="-12" max="12" step="1" value={eq.treble} onChange={(e) => setEq(prev => ({ ...prev, treble: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
           <span style={{ fontSize: 10, color: '#6b7280' }}>{eq.treble}dB</span>
         </div>
       </div>
       
-      {/* Compresor */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '60px' }}>
           <label style={{ fontSize: 10, color: '#6b7280' }}>Threshold</label>
-          <input
-            type="range"
-            min="-40"
-            max="0"
-            step="1"
-            value={compressor.threshold}
-            onChange={(e) => setCompressor(prev => ({ ...prev, threshold: Number(e.target.value) }))}
-            style={{ width: '100%', accentColor: '#10b981' }}
-          />
+          <input type="range" min="-40" max="0" step="1" value={compressor.threshold} onChange={(e) => setCompressor(prev => ({ ...prev, threshold: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
           <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.threshold}dB</span>
         </div>
         <div style={{ flex: 1, minWidth: '60px' }}>
           <label style={{ fontSize: 10, color: '#6b7280' }}>Ratio</label>
-          <input
-            type="range"
-            min="1"
-            max="20"
-            step="0.5"
-            value={compressor.ratio}
-            onChange={(e) => setCompressor(prev => ({ ...prev, ratio: Number(e.target.value) }))}
-            style={{ width: '100%', accentColor: '#10b981' }}
-          />
+          <input type="range" min="1" max="20" step="0.5" value={compressor.ratio} onChange={(e) => setCompressor(prev => ({ ...prev, ratio: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
           <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.ratio}:1</span>
         </div>
         <div style={{ flex: 1, minWidth: '60px' }}>
           <label style={{ fontSize: 10, color: '#6b7280' }}>Gain</label>
-          <input
-            type="range"
-            min="0"
-            max="20"
-            step="1"
-            value={compressor.gain}
-            onChange={(e) => setCompressor(prev => ({ ...prev, gain: Number(e.target.value) }))}
-            style={{ width: '100%', accentColor: '#10b981' }}
-          />
+          <input type="range" min="0" max="20" step="1" value={compressor.gain} onChange={(e) => setCompressor(prev => ({ ...prev, gain: Number(e.target.value) }))} style={{ width: '100%', accentColor: '#10b981' }} />
           <span style={{ fontSize: 9, color: '#6b7280' }}>{compressor.gain}dB</span>
         </div>
       </div>
@@ -259,22 +201,31 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
 // ============ COMPONENTE PRINCIPAL ============
 export default function JamWebPage() {
   const { user } = useAuth()
+  
+  // Estado de la sala
   const [roomId, setRoomId] = useState("")
   const [isInRoom, setIsInRoom] = useState(false)
+  const [roomName, setRoomName] = useState("")
+  const [visibility, setVisibility] = useState<'public' | 'private'>('public')
+  const [isAdmin, setIsAdmin] = useState(false)
+  
+  // Estado de la Jam
   const [messages, setMessages] = useState<any[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const [participants, setParticipants] = useState<any[]>([])
   const [isMuted, setIsMuted] = useState(false)
   const [myName, setMyName] = useState("")
   const [isNameSet, setIsNameSet] = useState(false)
-  const [isOwner, setIsOwner] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
   const [audioTest, setAudioTest] = useState<string>("")
   const [isMonitoring, setIsMonitoring] = useState(false)
   const [monitorVolume, setMonitorVolume] = useState(1.0)
+  const [view, setView] = useState<'browse' | 'room'>('browse')
+  const [publicSessions, setPublicSessions] = useState<any[]>([])
   
+  // Refs
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
@@ -295,7 +246,29 @@ export default function JamWebPage() {
     setMessages(prev => [...prev, { id: Date.now().toString(), user, text, timestamp: Date.now() }])
   }
 
-  // ============ AUDIO CON EFECTOS ============
+  // ============ CARGAR SALAS PÚBLICAS ============
+  useEffect(() => {
+    if (view === 'browse') {
+      loadPublicSessions()
+    }
+  }, [view])
+
+  const loadPublicSessions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('jam_sessions')
+        .select('*')
+        .eq('visibility', 'public')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setPublicSessions(data || [])
+    } catch (error) {
+      console.error('Error cargando sesiones:', error)
+    }
+  }
+
+  // ============ AUDIO ============
   const startLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -309,8 +282,6 @@ export default function JamWebPage() {
       })
       
       localStreamRef.current = stream
-      
-      // ✅ Activar monitorización
       await enableMonitoring(stream)
       
       const tracks = stream.getAudioTracks()
@@ -329,7 +300,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ MONITORIZACIÓN CON GANANCIA
   const enableMonitoring = async (stream: MediaStream) => {
     try {
       if (audioContextRef.current) {
@@ -512,7 +482,7 @@ export default function JamWebPage() {
     }
   }
 
-  // ============ SALA ============
+  // ============ GESTIÓN DE SALAS ============
   const createRoom = async (category: CategoryKey) => {
     if (!selectedInstrument) {
       addMessage("Sistema", "⚠️ Selecciona un instrumento")
@@ -521,7 +491,7 @@ export default function JamWebPage() {
 
     const newRoomId = generateRoomId()
     setRoomId(newRoomId)
-    setIsOwner(true)
+    setIsAdmin(true)
     setSelectedCategory(category)
     setRoomCategory(category)
     userIdRef.current = user?.id || `local-${Date.now()}`
@@ -529,21 +499,45 @@ export default function JamWebPage() {
     const ok = await startLocalStream()
     if (!ok) return
     
+    // Guardar sala en la base de datos
+    try {
+      const { data, error } = await supabase
+        .from('jam_sessions')
+        .insert({
+          id: newRoomId,
+          name: roomName || `Jam ${newRoomId}`,
+          visibility: visibility,
+          owner_id: user?.id,
+          category: category,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error guardando sala:', error)
+        addMessage("Sistema", "⚠️ Error al guardar la sala")
+      }
+    } catch (error) {
+      console.error('Error:', error)
+    }
+    
     setIsInRoom(true)
+    setView('room')
     setParticipants([{ 
       id: userIdRef.current, 
       name: myName || user?.email || 'Anónimo',
       instrument: selectedInstrument,
-      isOwner: true
+      isAdmin: true
     }])
     
-    addMessage("Sistema", `👑 ${myName} creó la sala ${newRoomId}`)
+    addMessage("Sistema", `👑 ${myName} creó la sala ${newRoomId} (${visibility})`)
     subscribeToRoom(newRoomId, category)
   }
 
-  const joinRoom = async () => {
+  const joinRoom = async (sessionId: string) => {
     if (!roomId.trim()) {
-      addMessage("Sistema", "⚠️ Introduce código de sala")
+      addMessage("Sistema", "⚠️ Introduce un código de sala")
       return
     }
     if (!selectedInstrument) {
@@ -551,18 +545,19 @@ export default function JamWebPage() {
       return
     }
 
-    setIsOwner(false)
+    setIsAdmin(false)
     userIdRef.current = user?.id || `local-${Date.now()}`
     
     const ok = await startLocalStream()
     if (!ok) return
     
     setIsInRoom(true)
+    setView('room')
     setParticipants([{ 
       id: userIdRef.current, 
       name: myName || user?.email || 'Anónimo',
       instrument: selectedInstrument,
-      isOwner: false
+      isAdmin: false
     }])
     addMessage("Sistema", `🎵 ${myName} se unió a ${roomId}`)
     subscribeToRoom(roomId, selectedCategory || 'moderna')
@@ -585,7 +580,7 @@ export default function JamWebPage() {
               id: payload.id, 
               name: payload.name, 
               instrument: payload.instrument || 'Sin instrumento',
-              isOwner: payload.isOwner || false
+              isAdmin: payload.isAdmin || false
             }]
           }
           return prev
@@ -626,7 +621,7 @@ export default function JamWebPage() {
               id: userIdRef.current, 
               name: myName || 'Anónimo',
               instrument: selectedInstrument,
-              isOwner: isOwner
+              isAdmin: isAdmin
             }
           })
           setTimeout(() => connectToAll(), 1500)
@@ -672,15 +667,17 @@ export default function JamWebPage() {
     }
     
     setIsInRoom(false)
+    setView('browse')
     setRoomId("")
     setParticipants([])
     setMessages([])
     setIsMuted(false)
-    setIsOwner(false)
+    setIsAdmin(false)
     setSelectedCategory(null)
     setSelectedInstrument("")
     setRoomCategory("")
     setAudioTest("")
+    loadPublicSessions()
   }
 
   // ============ UI ============
@@ -706,46 +703,80 @@ export default function JamWebPage() {
     )
   }
 
-  if (!isInRoom) {
+  // ============ VISTA DE EXPLORACIÓN ============
+  if (view === 'browse') {
     return (
-      <div style={{ display: "flex", minHeight: "100vh", background: "#0a0a0a", color: "white", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-        <div style={{ maxWidth: 500, width: "100%", padding: 40, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
-          <h1 style={{ fontSize: 48, textAlign: "center", marginBottom: 8 }}>🎵</h1>
-          <h2 style={{ textAlign: "center", marginBottom: 24 }}>Jam Session</h2>
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "20px", maxWidth: "800px", margin: "0 auto" }}>
+        <h1 style={{ fontSize: 32, marginBottom: 8 }}>🎵 Jam Sessions</h1>
+        <p style={{ color: "#6b7280", marginBottom: 20 }}>Encuentra salas públicas o crea tu propia Jam</p>
+
+        {/* Crear sala */}
+        <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "16px", border: "1px solid rgba(255,255,255,0.05)", marginBottom: "20px" }}>
+          <h3 style={{ margin: "0 0 12px 0", color: "#10b981", fontSize: 16 }}>🎸 Crear nueva Jam</h3>
           
-          <div style={{ marginBottom: 20 }}>
-            <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎯 Elige el tipo de Jam:</p>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <div style={{ marginBottom: 8 }}>
+            <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="Nombre de la sala" style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 14, marginBottom: 8 }} />
+            <div style={{ display: "flex", gap: "12px", marginBottom: 8 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", color: "#9ca3af", fontSize: 14 }}>
+                <input type="radio" name="visibility" value="public" checked={visibility === 'public'} onChange={() => setVisibility('public')} />
+                🌍 Pública
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", color: "#9ca3af", fontSize: 14 }}>
+                <input type="radio" name="visibility" value="private" checked={visibility === 'private'} onChange={() => setVisibility('private')} />
+                🔒 Privada
+              </label>
+            </div>
+          </div>
+          
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            <select value={selectedCategory || ''} onChange={(e) => setSelectedCategory(e.target.value as CategoryKey)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", flex: 1 }}>
+              <option value="">Selecciona categoría</option>
               {Object.entries(CATEGORIES).map(([key, cat]) => (
-                <button key={key} onClick={() => { setSelectedCategory(key as CategoryKey); setSelectedInstrument("") }} style={{ flex: 1, minWidth: "100px", padding: "12px", background: selectedCategory === key ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedCategory === key ? "#10b981" : "#9ca3af", border: selectedCategory === key ? "2px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", textAlign: "center" }}>
-                  <div style={{ fontSize: 28 }}>{cat.emoji}</div>
-                  <div style={{ fontSize: 13 }}>{cat.name}</div>
-                </button>
+                <option key={key} value={key}>{cat.emoji} {cat.name}</option>
               ))}
-            </div>
+            </select>
+            <select value={selectedInstrument} onChange={(e) => setSelectedInstrument(e.target.value)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", flex: 1 }}>
+              <option value="">Selecciona instrumento</option>
+              {selectedCategory && CATEGORIES[selectedCategory]?.instruments.map((inst) => (
+                <option key={inst} value={inst}>{getInstrumentEmoji(inst)} {inst}</option>
+              ))}
+            </select>
           </div>
-
-          {selectedCategory && (
-            <div style={{ marginBottom: 20 }}>
-              <p style={{ color: "#9ca3af", marginBottom: 12, fontWeight: "bold" }}>🎸 Elige tu instrumento:</p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                {CATEGORIES[selectedCategory].instruments.map((inst) => (
-                  <button key={inst} onClick={() => setSelectedInstrument(inst)} style={{ padding: "8px 16px", background: selectedInstrument === inst ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: selectedInstrument === inst ? "#10b981" : "#9ca3af", border: selectedInstrument === inst ? "2px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
-                    {getInstrumentEmoji(inst)} {inst}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <button onClick={() => { if (selectedCategory && selectedInstrument) createRoom(selectedCategory) }} disabled={!selectedCategory || !selectedInstrument} style={{ width: "100%", padding: "14px", background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontSize: 16, fontWeight: "bold", cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed" }}>🎸 Crear sala</button>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value.toUpperCase())} placeholder="Código de sala" style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid #333", background: "rgba(255,255,255,0.05)", color: "white", fontSize: 16, textTransform: "uppercase" }} />
-              <button onClick={joinRoom} disabled={!roomId.trim() || !selectedCategory || !selectedInstrument} style={{ padding: "10px 20px", background: (roomId.trim() && selectedCategory && selectedInstrument) ? "#3b82f6" : "#444", color: "white", border: "none", borderRadius: 8, cursor: (roomId.trim() && selectedCategory && selectedInstrument) ? "pointer" : "not-allowed", fontWeight: "bold" }}>Unirse</button>
-            </div>
-          </div>
+          
+          <button onClick={() => { if (selectedCategory && selectedInstrument) createRoom(selectedCategory) }} disabled={!selectedCategory || !selectedInstrument} style={{ width: "100%", marginTop: 8, padding: "12px", background: (selectedCategory && selectedInstrument) ? "#10b981" : "#444", color: "white", border: "none", borderRadius: 8, fontWeight: "bold", cursor: (selectedCategory && selectedInstrument) ? "pointer" : "not-allowed" }}>
+            🎸 Crear sala {visibility === 'public' ? 'pública' : 'privada'}
+          </button>
         </div>
+
+        {/* Lista de salas públicas */}
+        <h3 style={{ margin: "0 0 12px 0", color: "#9ca3af", fontSize: 16 }}>🌍 Salas públicas</h3>
+        
+        {publicSessions.length === 0 ? (
+          <p style={{ color: "#6b7280" }}>No hay salas públicas disponibles</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {publicSessions.map((session) => (
+              <div key={session.id} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "12px 16px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                  <div>
+                    <div style={{ fontWeight: "bold", color: "white" }}>{session.name || session.id}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>
+                      👤 {session.owner_id || 'Anónimo'} · 🎵 {session.category || 'Sin categoría'}
+                    </div>
+                  </div>
+                  <button onClick={() => {
+                    setRoomId(session.id)
+                    setRoomCategory(session.category || 'moderna')
+                    setSelectedCategory(session.category as CategoryKey || 'moderna')
+                    joinRoom(session.id)
+                  }} style={{ padding: "6px 14px", background: "#3b82f6", color: "white", border: "none", borderRadius: 6, cursor: "pointer" }}>
+                    Unirse
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -759,7 +790,7 @@ export default function JamWebPage() {
           <span style={{ color: "#10b981", fontWeight: "bold" }}>🎵 {roomId}</span>
           <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
-          {isOwner && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑</span>}
+          {isAdmin && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑 Admin</span>}
           <span style={{ marginLeft: 12, fontSize: 12, color: audioTest?.includes("✅") ? "#10b981" : "#ef4444" }}>{audioTest}</span>
           {isMonitoring && <span style={{ marginLeft: 12, fontSize: 12, color: "#10b981" }}>🔊 {Math.round(monitorVolume * 100)}%</span>}
         </div>
@@ -784,7 +815,7 @@ export default function JamWebPage() {
             <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 10px", background: p.id === userIdRef.current ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", borderRadius: 6, border: p.id === userIdRef.current ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)" }}>
               <span style={{ fontSize: 20 }}>{getInstrumentEmoji(p.instrument)}</span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: p.id === userIdRef.current ? "bold" : "normal", color: "white", fontSize: 13 }}>{p.name} {p.id === userIdRef.current && "(tú)"}{p.isOwner && " 👑"}</div>
+                <div style={{ fontWeight: p.id === userIdRef.current ? "bold" : "normal", color: "white", fontSize: 13 }}>{p.name} {p.id === userIdRef.current && "(tú)"}{p.isAdmin && " 👑"}</div>
                 <div style={{ fontSize: 11, color: "#6b7280" }}>{p.instrument}</div>
               </div>
               {p.id !== userIdRef.current && <span style={{ fontSize: 12, color: peerConnectionsRef.current.has(p.id) ? "#10b981" : "#fbbf24" }}>{peerConnectionsRef.current.has(p.id) ? "🔗" : "⏳"}</span>}
@@ -793,10 +824,8 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      {/* ✅ EFECTOS DE AUDIO */}
-      {localStreamRef.current && (
-        <AudioEffects stream={localStreamRef.current} />
-      )}
+      {/* Efectos de audio */}
+      {localStreamRef.current && <AudioEffects stream={localStreamRef.current} />}
 
       {/* Chat */}
       <div style={{ display: "flex", flexDirection: "column", height: "300px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden", marginTop: "8px" }}>
