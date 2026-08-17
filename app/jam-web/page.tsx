@@ -308,13 +308,11 @@ export default function JamWebPage() {
     
     const timeSinceLastActivity = Date.now() - lastActivityRef.current
     
-    // Aviso 1 minuto antes
     if (timeSinceLastActivity > INACTIVITY_WARNING && timeSinceLastActivity < INACTIVITY_LIMIT) {
       setInactivityWarning(true)
       addMessage("Sistema", "⚠️ La sala se cerrará en 1 minuto por inactividad")
     }
     
-    // Cierre por inactividad
     if (timeSinceLastActivity > INACTIVITY_LIMIT) {
       console.log('⏰ Sala cerrada por inactividad (10 minutos)')
       addMessage("Sistema", "⏰ Sala cerrada por inactividad (10 minutos)")
@@ -341,7 +339,6 @@ export default function JamWebPage() {
         .delete()
         .eq('jam_id', roomId)
       
-      // ✅ Limpiar sessionStorage
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('jamRoomId')
         sessionStorage.removeItem('jamIsAdmin')
@@ -362,7 +359,6 @@ export default function JamWebPage() {
   }
 
   const leaveRoom = async () => {
-    // Guardar que el admin está saliendo
     if (isAdmin && roomId) {
       await supabase
         .from('jam_sessions')
@@ -389,7 +385,6 @@ export default function JamWebPage() {
       localStreamRef.current = null
     }
     
-    // Limpiar timers
     if (heartbeatIntervalRef.current) {
       clearInterval(heartbeatIntervalRef.current)
       heartbeatIntervalRef.current = null
@@ -399,7 +394,6 @@ export default function JamWebPage() {
       inactivityCheckRef.current = null
     }
     
-    // ✅ Limpiar sessionStorage
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem('jamRoomId')
       sessionStorage.removeItem('jamIsAdmin')
@@ -421,21 +415,17 @@ export default function JamWebPage() {
   // ✅ CONFIGURAR TIMERS DEL ADMIN
   useEffect(() => {
     if (isInRoom && isAdmin) {
-      // Inicializar timers
       lastHeartbeatRef.current = Date.now()
       lastActivityRef.current = Date.now()
       
-      // Heartbeat cada 15 segundos
       heartbeatIntervalRef.current = setInterval(() => {
         sendHeartbeat()
       }, HEARTBEAT_INTERVAL)
       
-      // Verificar heartbeat cada 10 segundos
       const heartbeatCheck = setInterval(() => {
         checkHeartbeat()
       }, 10000)
       
-      // Verificar inactividad cada 30 segundos
       inactivityCheckRef.current = setInterval(() => {
         checkInactivity()
       }, 30000)
@@ -454,7 +444,7 @@ export default function JamWebPage() {
     }
   }, [isInRoom, isAdmin, roomId])
 
-  // ✅ CIERRE AL CERRAR VENTANA
+  // ✅ CIERRE AL CERRAR VENTANA (beforeunload)
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAdmin && roomId) {
@@ -462,6 +452,7 @@ export default function JamWebPage() {
           '/api/jam/close',
           JSON.stringify({ roomId, userId: user?.id })
         )
+        console.log('🚪 beforeunload - cerrando sala')
       }
     }
 
@@ -469,6 +460,25 @@ export default function JamWebPage() {
     
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [isAdmin, roomId, user?.id])
+
+  // ✅ CIERRE AL CAMBIAR DE PESTAÑA O CERRAR (visibilitychange)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isAdmin && roomId) {
+        navigator.sendBeacon(
+          '/api/jam/close',
+          JSON.stringify({ roomId, userId: user?.id })
+        )
+        console.log('🚪 visibilitychange - cerrando sala')
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [isAdmin, roomId, user?.id])
 
@@ -699,7 +709,6 @@ export default function JamWebPage() {
     setRoomCategory(category)
     userIdRef.current = user?.id || `local-${Date.now()}`
     
-    // ✅ Guardar en sessionStorage para el cierre de sesión
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('jamRoomId', newRoomId)
       sessionStorage.setItem('jamIsAdmin', 'true')
@@ -754,7 +763,6 @@ export default function JamWebPage() {
       loadRequests(newRoomId)
     }
     
-    // ✅ Registrar actividad inicial
     registerActivity()
   }
 
