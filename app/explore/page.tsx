@@ -33,6 +33,16 @@ export default function ExplorePage() {
             </div>
           </Link>
 
+          <Link href="/projects" style={{ padding: "16px 20px", background: "rgba(251,191,36,0.05)", borderRadius: 8, border: "1px solid rgba(251,191,36,0.1)", textDecoration: "none", color: "#fbbf24" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <span style={{ fontSize: 24 }}>📁</span>
+              <div>
+                <div style={{ fontWeight: "bold" }}>Proyectos</div>
+                <div style={{ fontSize: 14, color: "#6b7280" }}>Ver y gestionar tus proyectos</div>
+              </div>
+            </div>
+          </Link>
+
           {user ? (
             <div style={{ padding: "16px 20px", background: "rgba(16,185,129,0.05)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
               <div style={{ fontSize: 14, color: "#10b981" }}>✅ Conectado como {user.email}</div>

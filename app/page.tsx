@@ -24,6 +24,9 @@ export default function HomePage() {
               <Link href="/jam-web" style={{ padding: "12px 24px", background: "#8b5cf6", color: "white", borderRadius: 8, textDecoration: "none", fontWeight: "bold" }}>
                 🎸 Crear/Unirse a Sala
               </Link>
+              <Link href="/projects" style={{ padding: "12px 24px", background: "rgba(251,191,36,0.1)", color: "#fbbf24", borderRadius: 8, textDecoration: "none", fontWeight: "bold", border: "1px solid rgba(251,191,36,0.2)" }}>
+                📁 Proyectos
+              </Link>
               <button onClick={signOut} style={{ padding: "12px 24px", background: "rgba(239,68,68,0.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, cursor: "pointer" }}>
                 Cerrar sesión
               </button>
