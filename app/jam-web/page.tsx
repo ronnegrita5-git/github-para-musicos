@@ -37,6 +37,78 @@ const getInstrumentEmoji = (instrument: string) => {
   return emojis[instrument] || '🎵'
 }
 
+// ============ VISUALIZADOR DE VOLUMEN ============
+function VolumeIndicator({ stream, label }: { stream: MediaStream | null, label?: string }) {
+  const [volume, setVolume] = useState(0)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animationRef = useRef<number>()
+  const audioContextRef = useRef<AudioContext | null>(null)
+
+  useEffect(() => {
+    if (!stream) return
+
+    const initAudio = async () => {
+      try {
+        const ctx = new AudioContext()
+        audioContextRef.current = ctx
+        const analyser = ctx.createAnalyser()
+        const source = ctx.createMediaStreamSource(stream)
+        source.connect(analyser)
+        analyser.fftSize = 256
+        analyserRef.current = analyser
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+        const updateVolume = () => {
+          if (!analyserRef.current) return
+          analyserRef.current.getByteFrequencyData(dataArray)
+          const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+          setVolume(average / 255)
+          animationRef.current = requestAnimationFrame(updateVolume)
+        }
+        updateVolume()
+      } catch (e) {
+        console.log('Error en visualizador:', e)
+      }
+    }
+
+    initAudio()
+
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current)
+      if (audioContextRef.current) audioContextRef.current.close()
+    }
+  }, [stream])
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+      <div style={{ display: 'flex', gap: 2, alignItems: 'center', height: 20 }}>
+        {[...Array(15)].map((_, i) => {
+          const height = Math.max(2, volume * 25 * (i / 15 + 0.15))
+          const isActive = volume > 0.05
+          return (
+            <div
+              key={i}
+              style={{
+                width: 3,
+                height: Math.min(height, 20),
+                background: isActive ? '#10b981' : 'rgba(255,255,255,0.1)',
+                borderRadius: 2,
+                transition: 'height 0.08s ease'
+              }}
+            />
+          )
+        })}
+      </div>
+      {label && (
+        <span style={{ fontSize: 10, color: volume > 0.05 ? '#10b981' : '#6b7280' }}>
+          {volume > 0.05 ? '🔊' : '🔇'}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ============ EFECTOS DE AUDIO ============
 function AudioEffects({ stream }: { stream: MediaStream | null }) {
   const [compressor, setCompressor] = useState({
@@ -215,7 +287,7 @@ export default function JamWebPage() {
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
-  const [isListener, setIsListener] = useState(false) // ✅ Nuevo: modo oyente
+  const [isListener, setIsListener] = useState(false)
   
   // Estado de la Jam
   const [messages, setMessages] = useState<any[]>([])
@@ -239,7 +311,6 @@ export default function JamWebPage() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
   
-  // ✅ TIMERS
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastHeartbeatRef = useRef<number>(Date.now())
   const lastActivityRef = useRef<number>(Date.now())
@@ -267,7 +338,6 @@ export default function JamWebPage() {
     setInactivityWarning(false)
   }
 
-  // ✅ HEARTBEAT
   const sendHeartbeat = async () => {
     if (!isAdmin || !roomId) return
     
@@ -319,7 +389,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ============ FUNCIONES DE SALA ============
   const deleteRoomSilent = async () => {
     try {
       await supabase
@@ -411,7 +480,6 @@ export default function JamWebPage() {
     loadPublicSessions()
   }
 
-  // ✅ CONFIGURAR TIMERS DEL ADMIN
   useEffect(() => {
     if (isInRoom && isAdmin) {
       lastHeartbeatRef.current = Date.now()
@@ -443,7 +511,6 @@ export default function JamWebPage() {
     }
   }, [isInRoom, isAdmin, roomId])
 
-  // ✅ CIERRE AL CERRAR VENTANA
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAdmin && roomId) {
@@ -480,7 +547,6 @@ export default function JamWebPage() {
     }
   }, [isAdmin, roomId, user?.id])
 
-  // ============ AUDIO ============
   const startLocalStream = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -573,12 +639,10 @@ export default function JamWebPage() {
     }
   }
 
-  // ============ WEBRTC ============
   const createPeerConnection = (targetId: string) => {
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
-    // ✅ Si no es oyente, añadir stream local
     if (!isListener && localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!)
@@ -694,7 +758,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ============ GESTIÓN DE SALAS ============
   const createRoom = async (category: CategoryKey) => {
     if (!selectedInstrument) {
       addMessage("Sistema", "⚠️ Selecciona un instrumento")
@@ -766,7 +829,6 @@ export default function JamWebPage() {
     registerActivity()
   }
 
-  // ✅ UNIRSE COMO OYENTE
   const joinAsListener = async (sessionId: string) => {
     if (!user) {
       alert('Debes iniciar sesión para escuchar')
@@ -778,7 +840,6 @@ export default function JamWebPage() {
     userIdRef.current = user?.id || `local-${Date.now()}`
     setRoomId(sessionId)
     
-    // ✅ No iniciamos el stream local (solo escuchamos)
     setIsInRoom(true)
     setView('room')
     setParticipants([])
@@ -786,7 +847,6 @@ export default function JamWebPage() {
     addMessage("Sistema", `🎧 ${myName} está escuchando la Jam`)
     subscribeToRoom(sessionId, 'moderna')
     
-    // ✅ Unirse como oyente (sin micrófono)
     const session = publicSessions.find(s => s.id === sessionId)
     if (session) {
       setRoomName(session.name || sessionId.slice(0, 6))
@@ -938,7 +998,6 @@ export default function JamWebPage() {
     registerActivity()
   }
 
-  // ============ SOLICITUDES ============
   const loadRequests = async (jamId: string) => {
     try {
       const { data, error } = await supabase
@@ -1007,7 +1066,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ============ CARGAR SALAS PÚBLICAS ============
   const loadPublicSessions = async () => {
     try {
       const { data, error } = await supabase
@@ -1030,7 +1088,6 @@ export default function JamWebPage() {
     }
   }, [view])
 
-  // ============ UI ============
   if (!user) {
     return (
       <div style={{ padding: 40, color: "white", textAlign: "center" }}>
@@ -1054,7 +1111,6 @@ export default function JamWebPage() {
     )
   }
 
-  // ============ VISTA DE EXPLORACIÓN ============
   if (view === 'browse') {
     return (
       <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "20px", maxWidth: "800px", margin: "0 auto" }}>
@@ -1148,7 +1204,6 @@ export default function JamWebPage() {
     )
   }
 
-  // ============ SALA ACTIVA ============
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#0a0a0a", color: "white", padding: "16px", maxWidth: "800px", margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", padding: "12px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", flexWrap: "wrap", gap: "8px" }}>
@@ -1223,16 +1278,55 @@ export default function JamWebPage() {
       <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "12px", border: "1px solid rgba(255,255,255,0.05)", marginBottom: "12px" }}>
         <h3 style={{ margin: "0 0 8px 0", color: "#9ca3af", fontSize: 14 }}>🎵 Participantes</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          {participants.map((p) => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 10px", background: p.id === userIdRef.current ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", borderRadius: 6, border: p.id === userIdRef.current ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)" }}>
-              <span style={{ fontSize: 20 }}>{getInstrumentEmoji(p.instrument)}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: p.id === userIdRef.current ? "bold" : "normal", color: "white", fontSize: 13 }}>{p.name} {p.id === userIdRef.current && "(tú)"}{p.isAdmin && " 👑"}</div>
-                <div style={{ fontSize: 11, color: "#6b7280" }}>{p.instrument}</div>
+          {participants.map((p) => {
+            const isLocal = p.id === userIdRef.current
+            const hasStream = isLocal && localStreamRef.current !== null
+            const isRemote = !isLocal && peerConnectionsRef.current.has(p.id)
+            
+            return (
+              <div key={p.id} style={{ 
+                display: "flex", 
+                alignItems: "center", 
+                gap: "10px", 
+                padding: "6px 10px", 
+                background: isLocal ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", 
+                borderRadius: 6, 
+                border: isLocal ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.05)" 
+              }}>
+                <span style={{ fontSize: 20 }}>{getInstrumentEmoji(p.instrument)}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: isLocal ? "bold" : "normal", color: "white", fontSize: 13 }}>
+                    {p.name} {isLocal && "(tú)"}{p.isAdmin && " 👑"}{p.isListener && " 🎧"}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>{p.instrument}</div>
+                </div>
+                
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  {isLocal && hasStream && (
+                    <VolumeIndicator stream={localStreamRef.current} label="tú" />
+                  )}
+                  {isRemote && (
+                    <VolumeIndicator stream={null} label="remoto" />
+                  )}
+                  {isLocal && !hasStream && (
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>⏳</span>
+                  )}
+                  {!isLocal && !isRemote && (
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>⏳</span>
+                  )}
+                  
+                  {p.id !== userIdRef.current && (
+                    <span style={{ 
+                      fontSize: 12, 
+                      color: peerConnectionsRef.current.has(p.id) ? "#10b981" : "#fbbf24"
+                    }}>
+                      {peerConnectionsRef.current.has(p.id) ? "🔗" : "⏳"}
+                    </span>
+                  )}
+                </div>
               </div>
-              {p.id !== userIdRef.current && <span style={{ fontSize: 12, color: peerConnectionsRef.current.has(p.id) ? "#10b981" : "#fbbf24" }}>{peerConnectionsRef.current.has(p.id) ? "🔗" : "⏳"}</span>}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
