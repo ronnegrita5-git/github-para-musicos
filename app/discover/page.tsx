@@ -26,6 +26,7 @@ export default function DiscoverPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [filterCategory, setFilterCategory] = useState<string>("all")
   
+  // Audio refs
   const audioContextRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
@@ -52,6 +53,7 @@ export default function DiscoverPage() {
     return emojis[instrument] || '🎵'
   }
 
+  // ============ CARGAR SALAS ============
   const loadSessions = async () => {
     setLoading(true)
     try {
@@ -91,59 +93,17 @@ export default function DiscoverPage() {
     loadSessions()
   }, [filterCategory, searchTerm])
 
+  // ============ WEBRTC ============
   const PEER_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   }
 
-  const createPeerConnection = (targetId: string) => {
-    const pc = new RTCPeerConnection(PEER_CONFIG)
-    peerConnectionsRef.current.set(targetId, pc)
-
-    pc.ontrack = (event) => {
-      console.log(`📥 Audio remoto recibido de: ${targetId}`)
-      let audioEl = audioElementsRef.current.get(targetId)
-      if (!audioEl) {
-        audioEl = new Audio()
-        audioEl.autoplay = true
-        audioEl.volume = 1.0
-        audioElementsRef.current.set(targetId, audioEl)
-      }
-      audioEl.srcObject = event.streams[0]
-      audioEl.play().catch(e => console.log('Error:', e))
-      setAudioTest(`🔊 Escuchando`)
-    }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && channelRef.current) {
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'ice-candidate',
-          payload: {
-            fromId: userIdRef.current,
-            targetId: targetId,
-            candidate: event.candidate
-          }
-        })
-      }
-    }
-
-    pc.onconnectionstatechange = () => {
-      console.log(`🔗 Estado de conexión:`, pc.connectionState)
-      if (pc.connectionState === 'connected') {
-        setAudioTest(`✅ Conectado`)
-      }
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        cleanupPeerConnection(targetId)
-      }
-    }
-
-    return pc
-  }
-
   const cleanupPeerConnection = (targetId: string) => {
+    console.log('🧹 Limpiando conexión con:', targetId)
     const pc = peerConnectionsRef.current.get(targetId)
     if (pc) {
       pc.close()
@@ -157,16 +117,97 @@ export default function DiscoverPage() {
     }
   }
 
+  const createPeerConnection = (targetId: string) => {
+    console.log(`🔗 Creando conexión con: ${targetId}`)
+    const pc = new RTCPeerConnection(PEER_CONFIG)
+    peerConnectionsRef.current.set(targetId, pc)
+
+    // ✅ Soy oyente, NO añado tracks locales
+    console.log('📤 Oyente - no añadiendo tracks')
+
+    pc.ontrack = (event) => {
+      console.log(`📥 Audio remoto recibido de: ${targetId}`)
+      console.log(`📥 Streams: ${event.streams.length}, Tracks: ${event.streams[0]?.getTracks().length}`)
+      
+      let audioEl = audioElementsRef.current.get(targetId)
+      if (!audioEl) {
+        audioEl = new Audio()
+        audioEl.autoplay = true
+        audioEl.volume = 1.0
+        audioElementsRef.current.set(targetId, audioEl)
+        console.log('🔊 Nuevo elemento de audio creado para:', targetId)
+      }
+      
+      try {
+        audioEl.srcObject = event.streams[0]
+        audioEl.play().then(() => {
+          console.log(`✅ Audio reproduciéndose para: ${targetId}`)
+          setAudioTest(`🔊 Escuchando ${targetId.slice(0, 6)}`)
+        }).catch(e => {
+          console.log('❌ Error playing audio:', e)
+          setAudioTest(`❌ Error al reproducir`)
+        })
+      } catch (e) {
+        console.error('❌ Error asignando srcObject:', e)
+      }
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && channelRef.current) {
+        console.log('🧊 ICE candidate enviado a:', targetId)
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'ice-candidate',
+          payload: {
+            fromId: userIdRef.current,
+            targetId: targetId,
+            candidate: event.candidate
+          }
+        })
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState
+      console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, state)
+      
+      if (state === 'connected') {
+        setAudioTest(`✅ Conectado a ${targetId.slice(0, 6)}`)
+        console.log('✅ Conexión establecida correctamente')
+      }
+      
+      if (state === 'disconnected' || state === 'failed') {
+        console.log(`⚠️ Conexión perdida con ${targetId.slice(0, 6)}`)
+        cleanupPeerConnection(targetId)
+        setAudioTest(`⚠️ Desconectado`)
+      }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`🧊 ICE estado: ${pc.iceConnectionState}`)
+    }
+
+    return pc
+  }
+
   const createOffer = async (targetId: string) => {
     try {
-      if (peerConnectionsRef.current.has(targetId)) return
+      console.log(`📤 Creando oferta para: ${targetId}`)
+      
+      if (peerConnectionsRef.current.has(targetId)) {
+        console.log(`⚠️ Ya existe conexión con ${targetId}`)
+        return
+      }
       
       const pc = createPeerConnection(targetId)
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: false
       })
+      
+      console.log('📤 Oferta creada, estableciendo local description...')
       await pc.setLocalDescription(offer)
+      console.log('📤 Local description establecido')
       
       if (channelRef.current) {
         channelRef.current.send({
@@ -178,19 +219,29 @@ export default function DiscoverPage() {
             offer: offer
           }
         })
+        console.log('📤 Oferta enviada a:', targetId)
+      } else {
+        console.error('❌ No hay canal para enviar la oferta')
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('❌ Error creando oferta:', error)
     }
   }
 
   const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
     try {
+      console.log('📥 Oferta recibida de:', fromId)
       const pc = createPeerConnection(fromId)
+      
+      console.log('📥 Estableciendo remote description...')
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
+      console.log('📥 Remote description establecido')
       
       const answer = await pc.createAnswer()
+      console.log('📥 Answer creado')
+      
       await pc.setLocalDescription(answer)
+      console.log('📥 Local description establecido (answer)')
       
       if (channelRef.current) {
         channelRef.current.send({
@@ -202,74 +253,114 @@ export default function DiscoverPage() {
             answer: answer
           }
         })
+        console.log('📥 Answer enviado a:', fromId)
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('❌ Error manejando oferta:', error)
     }
   }
 
   const handleAnswer = async (fromId: string, answer: RTCSessionDescriptionInit) => {
     try {
+      console.log('📥 Answer recibido de:', fromId)
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
+        console.log('📥 Remote description establecido (answer)')
+      } else {
+        console.warn('⚠️ No se encontró peer connection para:', fromId)
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('❌ Error manejando answer:', error)
     }
   }
 
   const handleIceCandidate = async (fromId: string, candidate: RTCIceCandidateInit) => {
     try {
+      console.log('🧊 ICE candidate recibido de:', fromId)
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        console.log('🧊 ICE candidate añadido')
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('❌ Error añadiendo ICE candidate:', error)
     }
   }
 
   const connectToAll = async () => {
-    if (!channelRef.current) return
+    if (!channelRef.current) {
+      console.warn('⚠️ No hay canal para conectar')
+      return
+    }
     
-    const presenceState = channelRef.current.presenceState()
-    const participants = Object.values(presenceState).flat() as any[]
-    const others = participants.filter((p: any) => p.id !== userIdRef.current)
-    
-    for (const p of others) {
-      if (!peerConnectionsRef.current.has(p.id)) {
-        await createOffer(p.id)
+    try {
+      const presenceState = channelRef.current.presenceState()
+      console.log('📡 Estado de presencia:', presenceState)
+      
+      const participants = Object.values(presenceState).flat() as any[]
+      const others = participants.filter((p: any) => p.id !== userIdRef.current)
+      
+      console.log(`🔗 Conectando con ${others.length} participantes:`, others.map((p: any) => p.name))
+      
+      for (const p of others) {
+        if (!peerConnectionsRef.current.has(p.id)) {
+          console.log(`🔗 Creando oferta para: ${p.name} (${p.id.slice(0,6)})`)
+          await createOffer(p.id)
+        } else {
+          console.log(`⏭️ Ya conectado con: ${p.name}`)
+        }
       }
+    } catch (error) {
+      console.error('❌ Error en connectToAll:', error)
     }
   }
 
+  // ============ ESCUCHAR SALA ============
   const connectToRoom = async (sessionId: string) => {
     try {
+      console.log('🔍 Conectando a sala:', sessionId)
       userIdRef.current = user?.id || `listener-${Date.now()}`
+      console.log('🔍 userId:', userIdRef.current)
+      
+      // Limpiar conexiones anteriores
+      peerConnectionsRef.current.forEach((pc) => pc.close())
+      peerConnectionsRef.current.clear()
+      audioElementsRef.current.forEach((audio) => {
+        audio.pause()
+        audio.srcObject = null
+      })
+      audioElementsRef.current.clear()
       
       const channel = supabase.channel(`jam:${sessionId}`)
       channelRef.current = channel
 
       channel
         .on('broadcast', { event: 'offer' }, ({ payload }) => {
+          console.log('🔍 Oferta recibida:', payload)
           if (payload.targetId === userIdRef.current) {
             handleOffer(payload.fromId, payload.offer)
           }
         })
         .on('broadcast', { event: 'answer' }, ({ payload }) => {
+          console.log('🔍 Answer recibido:', payload)
           if (payload.targetId === userIdRef.current) {
             handleAnswer(payload.fromId, payload.answer)
           }
         })
         .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
+          console.log('🔍 ICE candidate recibido:', payload)
           if (payload.targetId === userIdRef.current) {
             handleIceCandidate(payload.fromId, payload.candidate)
           }
         })
-        .subscribe((status) => {
+        .subscribe(async (status) => {
+          console.log('🔍 Estado del canal:', status)
+          
           if (status === 'SUBSCRIBED') {
-            channel.track({
+            console.log('🔍 Canal suscrito, trackeando presencia...')
+            
+            await channel.track({
               id: userIdRef.current,
               name: '🎧 Oyente',
               instrument: '🎧 Escuchando',
@@ -277,27 +368,33 @@ export default function DiscoverPage() {
               isListener: true
             })
             
+            console.log('✅ Presencia trackeada')
+            
+            // Esperar a que los participantes estén presentes
             setTimeout(() => {
+              console.log('🔍 Conectando a todos...')
               connectToAll()
-            }, 1500)
+            }, 2000)
           }
         })
 
       setAudioTest("✅ Conectado a la sala")
       return true
     } catch (error) {
-      console.error('Error:', error)
-      setAudioTest("❌ Error")
+      console.error('❌ Error conectando a sala:', error)
+      setAudioTest("❌ Error al conectar")
       return false
     }
   }
 
   const listenToSession = async (session: JamSession) => {
+    // Si ya estamos escuchando la misma sala, cerrar
     if (selectedSession?.id === session.id && isListening) {
       stopListening()
       return
     }
 
+    // Si estamos escuchando otra sala, cerrar primero
     if (isListening) {
       stopListening()
     }
@@ -306,24 +403,34 @@ export default function DiscoverPage() {
     setIsListening(true)
     setAudioTest("🔄 Conectando...")
 
+    console.log('🎧 Escuchando sala:', session.name, session.id)
     const connected = await connectToRoom(session.id)
+    
     if (!connected) {
       setIsListening(false)
+      setAudioTest("❌ Error al conectar")
     }
   }
 
   const stopListening = () => {
+    console.log('🚪 Dejando de escuchar...')
+    
+    // Limpiar canal
     if (channelRef.current) {
       try {
         channelRef.current.untrack()
         channelRef.current.unsubscribe()
-      } catch (e) {}
+      } catch (e) {
+        console.log('Error limpiando canal:', e)
+      }
       channelRef.current = null
     }
     
+    // Limpiar conexiones peer
     peerConnectionsRef.current.forEach((pc) => pc.close())
     peerConnectionsRef.current.clear()
     
+    // Limpiar audio elements
     audioElementsRef.current.forEach((audio) => {
       audio.pause()
       audio.srcObject = null
@@ -333,6 +440,7 @@ export default function DiscoverPage() {
     setIsListening(false)
     setSelectedSession(null)
     setAudioTest("")
+    console.log('✅ Conexiones limpiadas')
   }
 
   useEffect(() => {
@@ -341,6 +449,7 @@ export default function DiscoverPage() {
     }
   }, [])
 
+  // ============ UI ============
   if (!user) {
     return (
       <div style={{ padding: 40, color: "white", textAlign: "center" }}>
