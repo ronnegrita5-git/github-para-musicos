@@ -310,6 +310,7 @@ export default function JamWebPage() {
   const userIdRef = useRef<string>("")
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
+  const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
   
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastHeartbeatRef = useRef<number>(Date.now())
@@ -325,6 +326,7 @@ export default function JamWebPage() {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
     ]
   }
 
@@ -445,6 +447,14 @@ export default function JamWebPage() {
     
     peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
+    
+    // Limpiar audio elements remotos
+    audioElementsRef.current.forEach(audio => {
+      audio.pause()
+      audio.srcObject = null
+    })
+    audioElementsRef.current.clear()
+    
     await disableMonitoring()
     
     if (localStreamRef.current) {
@@ -560,7 +570,6 @@ export default function JamWebPage() {
       })
       
       localStreamRef.current = stream
-      await enableMonitoring(stream)
       
       const tracks = stream.getAudioTracks()
       if (tracks.length > 0) {
@@ -578,6 +587,7 @@ export default function JamWebPage() {
     }
   }
 
+  // ✅ MONITORIZACIÓN LOCAL (opcional, desactivada por defecto)
   const enableMonitoring = async (stream: MediaStream) => {
     try {
       if (audioContextRef.current) {
@@ -639,27 +649,42 @@ export default function JamWebPage() {
     }
   }
 
+  // ============ WEBRTC ============
   const createPeerConnection = (targetId: string) => {
+    console.log(`🔗 Creando conexión con: ${targetId}`)
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
+    // ✅ AÑADIR TRACKS LOCALES (SI NO ES OYENTE Y TENEMOS STREAM)
     if (!isListener && localStreamRef.current) {
+      console.log('📤 Añadiendo tracks locales a la conexión')
       localStreamRef.current.getTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!)
+        console.log('📤 Track añadido:', track.kind)
       })
+    } else {
+      console.log('📤 No añadiendo tracks (soy oyente o no tengo stream)')
     }
 
+    // ✅ RECIBIR AUDIO DEL OTRO LADO
     pc.ontrack = (event) => {
-      const audioEl = new Audio()
-      audioEl.autoplay = true
-      audioEl.volume = 1.0
+      console.log(`📥 Audio remoto recibido de: ${targetId}`)
+      let audioEl = audioElementsRef.current.get(targetId)
+      if (!audioEl) {
+        audioEl = new Audio()
+        audioEl.autoplay = true
+        audioEl.volume = 1.0
+        audioElementsRef.current.set(targetId, audioEl)
+        console.log('🔊 Nuevo elemento de audio creado para:', targetId)
+      }
       audioEl.srcObject = event.streams[0]
-      audioEl.play().catch(e => console.log('Error:', e))
+      audioEl.play().catch(e => console.log('Error playing audio:', e))
       addMessage("Sistema", "🔊 Audio recibido")
     }
 
     pc.onicecandidate = (event) => {
       if (event.candidate && channelRef.current) {
+        console.log('🧊 ICE candidate enviado a:', targetId)
         channelRef.current.send({
           type: 'broadcast',
           event: 'ice-candidate',
@@ -673,8 +698,19 @@ export default function JamWebPage() {
     }
 
     pc.onconnectionstatechange = () => {
+      console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, pc.connectionState)
       if (pc.connectionState === 'connected') {
         addMessage("Sistema", "🔗 Conectado con otro músico")
+      }
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        // Limpiar conexión fallida
+        const audioEl = audioElementsRef.current.get(targetId)
+        if (audioEl) {
+          audioEl.pause()
+          audioEl.srcObject = null
+          audioElementsRef.current.delete(targetId)
+        }
+        peerConnectionsRef.current.delete(targetId)
       }
     }
 
@@ -683,8 +719,12 @@ export default function JamWebPage() {
 
   const createOffer = async (targetId: string) => {
     try {
+      console.log(`📤 Creando oferta para: ${targetId}`)
       const pc = createPeerConnection(targetId)
-      const offer = await pc.createOffer()
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: false
+      })
       await pc.setLocalDescription(offer)
       
       if (channelRef.current) {
@@ -697,14 +737,16 @@ export default function JamWebPage() {
             offer: offer
           }
         })
+        console.log('📤 Oferta enviada a:', targetId)
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('Error creando oferta:', error)
     }
   }
 
   const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
     try {
+      console.log('📥 Oferta recibida de:', fromId)
       const pc = createPeerConnection(fromId)
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
       
@@ -721,36 +763,42 @@ export default function JamWebPage() {
             answer: answer
           }
         })
+        console.log('📥 Answer enviado a:', fromId)
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('Error manejando oferta:', error)
     }
   }
 
   const handleAnswer = async (fromId: string, answer: RTCSessionDescriptionInit) => {
     try {
+      console.log('📥 Answer recibido de:', fromId)
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
+        console.log('📥 Remote description establecido')
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('Error manejando answer:', error)
     }
   }
 
   const handleIceCandidate = async (fromId: string, candidate: RTCIceCandidateInit) => {
     try {
+      console.log('🧊 ICE candidate recibido de:', fromId)
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        console.log('🧊 ICE candidate añadido')
       }
     } catch (error) {
-      console.error('Error:', error)
+      console.error('Error añadiendo ICE candidate:', error)
     }
   }
 
   const connectToAll = async () => {
     const others = participants.filter(p => p.id !== userIdRef.current)
+    console.log(`🔗 Conectando con ${others.length} participantes`)
     for (const p of others) {
       if (!peerConnectionsRef.current.has(p.id)) {
         await createOffer(p.id)
@@ -758,6 +806,7 @@ export default function JamWebPage() {
     }
   }
 
+  // ============ GESTIÓN DE SALAS ============
   const createRoom = async (category: CategoryKey) => {
     if (!selectedInstrument) {
       addMessage("Sistema", "⚠️ Selecciona un instrumento")
@@ -900,6 +949,41 @@ export default function JamWebPage() {
     const channel = supabase.channel(`jam:${roomId}`)
     channelRef.current = channel
 
+    // ✅ PRESENCE: Sincronizar participantes
+    channel.on('presence', { event: 'sync' }, () => {
+      const state = channel.presenceState()
+      console.log('📡 Estado de presencia:', state)
+      
+      const newParticipants: any[] = []
+      Object.values(state).forEach((presence: any) => {
+        presence.forEach((p: any) => {
+          if (!newParticipants.some(existing => existing.id === p.id)) {
+            newParticipants.push({
+              id: p.id,
+              name: p.name || 'Anónimo',
+              instrument: p.instrument || 'Sin instrumento',
+              isAdmin: p.isAdmin || false,
+              isListener: p.isListener || false
+            })
+          }
+        })
+      })
+      
+      console.log('👥 Participantes únicos:', newParticipants)
+      setParticipants(newParticipants)
+      
+      // ✅ Conectar con todos los participantes (incluyendo oyentes)
+      const others = newParticipants.filter(p => p.id !== userIdRef.current)
+      console.log(`🔗 Conectando con ${others.length} participantes`)
+      
+      others.forEach(p => {
+        if (!peerConnectionsRef.current.has(p.id)) {
+          console.log(`🔗 Conectando con: ${p.name} (${p.id.slice(0,6)})`)
+          setTimeout(() => createOffer(p.id), 500)
+        }
+      })
+    })
+
     channel
       .on('broadcast', { event: 'user-joined' }, ({ payload }) => {
         addMessage("Sistema", `👤 ${payload.name} (${payload.instrument}) se unió`)
@@ -909,13 +993,14 @@ export default function JamWebPage() {
               id: payload.id, 
               name: payload.name, 
               instrument: payload.instrument || 'Sin instrumento',
-              isAdmin: payload.isAdmin || false
+              isAdmin: payload.isAdmin || false,
+              isListener: payload.isListener || false
             }]
           }
           return prev
         })
         setTimeout(() => {
-          if (payload.id !== userIdRef.current) {
+          if (payload.id !== userIdRef.current && !peerConnectionsRef.current.has(payload.id)) {
             createOffer(payload.id)
           }
         }, 1000)
@@ -925,7 +1010,16 @@ export default function JamWebPage() {
         addMessage("Sistema", `👤 ${payload.name} salió`)
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
         const pc = peerConnectionsRef.current.get(payload.id)
-        if (pc) { pc.close(); peerConnectionsRef.current.delete(payload.id) }
+        if (pc) { 
+          pc.close()
+          peerConnectionsRef.current.delete(payload.id)
+        }
+        const audioEl = audioElementsRef.current.get(payload.id)
+        if (audioEl) {
+          audioEl.pause()
+          audioEl.srcObject = null
+          audioElementsRef.current.delete(payload.id)
+        }
         registerActivity()
       })
       .on('broadcast', { event: 'offer' }, ({ payload }) => {
@@ -950,19 +1044,24 @@ export default function JamWebPage() {
         addMessage(payload.user, payload.text)
         registerActivity()
       })
-      .subscribe((status) => {
+      .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          channel.send({
-            type: 'broadcast',
-            event: 'user-joined',
-            payload: { 
-              id: userIdRef.current, 
-              name: myName || 'Anónimo',
-              instrument: isListener ? 'Oyente' : selectedInstrument,
-              isAdmin: isAdmin
-            }
+          console.log('📡 Canal suscrito')
+          
+          // ✅ Trackear presencia
+          await channel.track({
+            id: userIdRef.current,
+            name: isListener ? '🎧 Oyente' : myName || 'Anónimo',
+            instrument: isListener ? '🎧 Escuchando' : selectedInstrument,
+            isAdmin: isAdmin,
+            isListener: isListener
           })
-          setTimeout(() => connectToAll(), 1500)
+          
+          console.log('✅ Presencia trackeada')
+          
+          setTimeout(() => {
+            connectToAll()
+          }, 1500)
         }
       })
   }
@@ -1306,7 +1405,7 @@ export default function JamWebPage() {
                     <VolumeIndicator stream={localStreamRef.current} label="tú" />
                   )}
                   {isRemote && (
-                    <VolumeIndicator stream={null} label="remoto" />
+                    <span style={{ fontSize: 11, color: "#10b981" }}>🔊</span>
                   )}
                   {isLocal && !hasStream && (
                     <span style={{ fontSize: 11, color: "#6b7280" }}>⏳</span>

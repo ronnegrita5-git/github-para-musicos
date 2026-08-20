@@ -26,9 +26,6 @@ export default function DiscoverPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [filterCategory, setFilterCategory] = useState<string>("all")
   
-  // Audio refs
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
   const userIdRef = useRef<string>("")
@@ -53,7 +50,6 @@ export default function DiscoverPage() {
     return emojis[instrument] || '🎵'
   }
 
-  // ============ CARGAR SALAS ============
   const loadSessions = async () => {
     setLoading(true)
     try {
@@ -142,7 +138,7 @@ export default function DiscoverPage() {
         audioEl.srcObject = event.streams[0]
         audioEl.play().then(() => {
           console.log(`✅ Audio reproduciéndose para: ${targetId}`)
-          setAudioTest(`🔊 Escuchando ${targetId.slice(0, 6)}`)
+          setAudioTest(`🔊 Escuchando`)
         }).catch(e => {
           console.log('❌ Error playing audio:', e)
           setAudioTest(`❌ Error al reproducir`)
@@ -172,7 +168,7 @@ export default function DiscoverPage() {
       console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, state)
       
       if (state === 'connected') {
-        setAudioTest(`✅ Conectado a ${targetId.slice(0, 6)}`)
+        setAudioTest(`✅ Conectado`)
         console.log('✅ Conexión establecida correctamente')
       }
       
@@ -181,10 +177,6 @@ export default function DiscoverPage() {
         cleanupPeerConnection(targetId)
         setAudioTest(`⚠️ Desconectado`)
       }
-    }
-
-    pc.oniceconnectionstatechange = () => {
-      console.log(`🧊 ICE estado: ${pc.iceConnectionState}`)
     }
 
     return pc
@@ -388,13 +380,11 @@ export default function DiscoverPage() {
   }
 
   const listenToSession = async (session: JamSession) => {
-    // Si ya estamos escuchando la misma sala, cerrar
     if (selectedSession?.id === session.id && isListening) {
       stopListening()
       return
     }
 
-    // Si estamos escuchando otra sala, cerrar primero
     if (isListening) {
       stopListening()
     }
@@ -415,7 +405,6 @@ export default function DiscoverPage() {
   const stopListening = () => {
     console.log('🚪 Dejando de escuchar...')
     
-    // Limpiar canal
     if (channelRef.current) {
       try {
         channelRef.current.untrack()
@@ -426,11 +415,9 @@ export default function DiscoverPage() {
       channelRef.current = null
     }
     
-    // Limpiar conexiones peer
     peerConnectionsRef.current.forEach((pc) => pc.close())
     peerConnectionsRef.current.clear()
     
-    // Limpiar audio elements
     audioElementsRef.current.forEach((audio) => {
       audio.pause()
       audio.srcObject = null
