@@ -1030,6 +1030,7 @@ export default function JamWebPage() {
       channelRef.current.unsubscribe()
     }
 
+    console.log(`🔑 Suscribiéndose a sala: ${roomId}`)
     const channel = supabase.channel(`jam:${roomId}`)
     channelRef.current = channel
 
@@ -1136,7 +1137,7 @@ export default function JamWebPage() {
         if (status === 'SUBSCRIBED') {
           console.log('📡 Canal suscrito')
           
-          // ✅ Trackear presencia
+          // ✅ Trackear presencia con ID único
           const trackData = {
             id: userIdRef.current,
             name: isListener ? '🎧 Oyente' : myName || 'Anónimo',
@@ -1150,7 +1151,7 @@ export default function JamWebPage() {
           
           console.log('✅ Presencia trackeada')
           
-          // ✅ Forzar sincronización con retry
+          // ✅ Forzar sincronización después de 1s
           setTimeout(() => {
             const state = channel.presenceState()
             console.log('📡 Estado de presencia después de track:', state)
@@ -1179,7 +1180,7 @@ export default function JamWebPage() {
                 createOffer(p.id)
               }
             }
-          }, 2000)
+          }, 1000)
         }
       })
   }
