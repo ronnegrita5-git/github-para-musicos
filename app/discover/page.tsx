@@ -118,7 +118,6 @@ export default function DiscoverPage() {
     const pc = new RTCPeerConnection(PEER_CONFIG)
     peerConnectionsRef.current.set(targetId, pc)
 
-    // ✅ Soy oyente, NO añado tracks locales
     console.log('📤 Oyente - no añadiendo tracks')
 
     pc.ontrack = (event) => {
@@ -315,7 +314,6 @@ export default function DiscoverPage() {
       userIdRef.current = user?.id || `listener-${Date.now()}`
       console.log('🔍 userId:', userIdRef.current)
       
-      // Limpiar conexiones anteriores
       peerConnectionsRef.current.forEach((pc) => pc.close())
       peerConnectionsRef.current.clear()
       audioElementsRef.current.forEach((audio) => {
@@ -362,7 +360,6 @@ export default function DiscoverPage() {
             
             console.log('✅ Presencia trackeada')
             
-            // Esperar a que los participantes estén presentes
             setTimeout(() => {
               console.log('🔍 Conectando a todos...')
               connectToAll()

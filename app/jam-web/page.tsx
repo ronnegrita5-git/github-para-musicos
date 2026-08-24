@@ -448,7 +448,6 @@ export default function JamWebPage() {
     peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
     
-    // Limpiar audio elements remotos
     audioElementsRef.current.forEach(audio => {
       audio.pause()
       audio.srcObject = null
@@ -587,7 +586,6 @@ export default function JamWebPage() {
     }
   }
 
-  // ✅ MONITORIZACIÓN LOCAL (opcional, desactivada por defecto)
   const enableMonitoring = async (stream: MediaStream) => {
     try {
       if (audioContextRef.current) {
@@ -650,82 +648,89 @@ export default function JamWebPage() {
   }
 
   // ============ WEBRTC ============
-  const createPeerConnection = (targetId: string) => {
-    console.log(`🔗 Creando conexión con: ${targetId}`)
-    const pc = new RTCPeerConnection(PEER_CONFIG)
-    peerConnectionsRef.current.set(targetId, pc)
-
-    // ✅ AÑADIR TRACKS LOCALES (SI NO ES OYENTE Y TENEMOS STREAM)
-    if (!isListener && localStreamRef.current) {
-      console.log('📤 Añadiendo tracks locales a la conexión')
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current!)
-        console.log('📤 Track añadido:', track.kind)
-      })
-    } else {
-      console.log('📤 No añadiendo tracks (soy oyente o no tengo stream)')
-    }
-
-    // ✅ RECIBIR AUDIO DEL OTRO LADO
-    pc.ontrack = (event) => {
-      console.log(`📥 Audio remoto recibido de: ${targetId}`)
-      let audioEl = audioElementsRef.current.get(targetId)
-      if (!audioEl) {
-        audioEl = new Audio()
-        audioEl.autoplay = true
-        audioEl.volume = 1.0
-        audioElementsRef.current.set(targetId, audioEl)
-        console.log('🔊 Nuevo elemento de audio creado para:', targetId)
-      }
-      audioEl.srcObject = event.streams[0]
-      audioEl.play().catch(e => console.log('Error playing audio:', e))
-      addMessage("Sistema", "🔊 Audio recibido")
-    }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && channelRef.current) {
-        console.log('🧊 ICE candidate enviado a:', targetId)
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'ice-candidate',
-          payload: {
-            fromId: userIdRef.current,
-            targetId: targetId,
-            candidate: event.candidate
-          }
-        })
-      }
-    }
-
-    pc.onconnectionstatechange = () => {
-      console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, pc.connectionState)
-      if (pc.connectionState === 'connected') {
-        addMessage("Sistema", "🔗 Conectado con otro músico")
-      }
-      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        // Limpiar conexión fallida
-        const audioEl = audioElementsRef.current.get(targetId)
-        if (audioEl) {
-          audioEl.pause()
-          audioEl.srcObject = null
-          audioElementsRef.current.delete(targetId)
-        }
-        peerConnectionsRef.current.delete(targetId)
-      }
-    }
-
-    return pc
-  }
-
   const createOffer = async (targetId: string) => {
     try {
       console.log(`📤 Creando oferta para: ${targetId}`)
-      const pc = createPeerConnection(targetId)
+      
+      if (!localStreamRef.current) {
+        console.error('❌ No hay stream local para enviar')
+        return
+      }
+      
+      if (peerConnectionsRef.current.has(targetId)) {
+        console.log(`⚠️ Ya existe conexión con ${targetId}`)
+        return
+      }
+      
+      const pc = new RTCPeerConnection(PEER_CONFIG)
+      peerConnectionsRef.current.set(targetId, pc)
+
+      console.log('📤 Añadiendo tracks de audio a la conexión')
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current!)
+        console.log(`📤 Track añadido: ${track.kind}`)
+      })
+
+      pc.ontrack = (event) => {
+        console.log(`📥 Audio remoto recibido de: ${targetId}`)
+        let audioEl = audioElementsRef.current.get(targetId)
+        if (!audioEl) {
+          audioEl = new Audio()
+          audioEl.autoplay = true
+          audioEl.volume = 1.0
+          audioElementsRef.current.set(targetId, audioEl)
+          console.log('🔊 Nuevo elemento de audio creado para:', targetId)
+        }
+        audioEl.srcObject = event.streams[0]
+        audioEl.play().catch(e => console.log('Error playing audio:', e))
+        addMessage("Sistema", `🔊 Audio recibido de ${targetId.slice(0, 6)}`)
+      }
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && channelRef.current) {
+          console.log('🧊 ICE candidate enviado a:', targetId)
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'ice-candidate',
+            payload: {
+              fromId: userIdRef.current,
+              targetId: targetId,
+              candidate: event.candidate
+            }
+          })
+        }
+      }
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState
+        console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, state)
+        
+        if (state === 'connected') {
+          addMessage("Sistema", `✅ Conectado con otro músico`)
+          setAudioTest(`✅ Conectado a ${targetId.slice(0, 6)}`)
+        }
+        
+        if (state === 'disconnected' || state === 'failed') {
+          console.log(`⚠️ Conexión perdida con ${targetId.slice(0, 6)}`)
+          const audioEl = audioElementsRef.current.get(targetId)
+          if (audioEl) {
+            audioEl.pause()
+            audioEl.srcObject = null
+            audioElementsRef.current.delete(targetId)
+          }
+          peerConnectionsRef.current.delete(targetId)
+          setAudioTest(`⚠️ Desconectado de ${targetId.slice(0, 6)}`)
+        }
+      }
+
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: false
       })
+      
+      console.log('📤 Oferta creada, estableciendo local description...')
       await pc.setLocalDescription(offer)
+      console.log('📤 Local description establecido')
       
       if (channelRef.current) {
         channelRef.current.send({
@@ -738,20 +743,97 @@ export default function JamWebPage() {
           }
         })
         console.log('📤 Oferta enviada a:', targetId)
+      } else {
+        console.error('❌ No hay canal para enviar la oferta')
       }
     } catch (error) {
-      console.error('Error creando oferta:', error)
+      console.error('❌ Error creando oferta:', error)
     }
   }
 
   const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
     try {
       console.log('📥 Oferta recibida de:', fromId)
-      const pc = createPeerConnection(fromId)
+      
+      if (!isListener && !localStreamRef.current) {
+        console.error('❌ No hay stream local para responder')
+        return
+      }
+      
+      const pc = new RTCPeerConnection(PEER_CONFIG)
+      peerConnectionsRef.current.set(fromId, pc)
+
+      if (!isListener && localStreamRef.current) {
+        console.log('📤 Añadiendo tracks locales a la respuesta')
+        localStreamRef.current.getTracks().forEach(track => {
+          pc.addTrack(track, localStreamRef.current!)
+          console.log(`📤 Track añadido: ${track.kind}`)
+        })
+      } else {
+        console.log('📤 No añadiendo tracks (soy oyente)')
+      }
+
+      pc.ontrack = (event) => {
+        console.log(`📥 Audio remoto recibido de: ${fromId}`)
+        let audioEl = audioElementsRef.current.get(fromId)
+        if (!audioEl) {
+          audioEl = new Audio()
+          audioEl.autoplay = true
+          audioEl.volume = 1.0
+          audioElementsRef.current.set(fromId, audioEl)
+          console.log('🔊 Nuevo elemento de audio creado para:', fromId)
+        }
+        audioEl.srcObject = event.streams[0]
+        audioEl.play().catch(e => console.log('Error playing audio:', e))
+        addMessage("Sistema", `🔊 Audio recibido de ${fromId.slice(0, 6)}`)
+      }
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && channelRef.current) {
+          console.log('🧊 ICE candidate enviado a:', fromId)
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'ice-candidate',
+            payload: {
+              fromId: userIdRef.current,
+              targetId: fromId,
+              candidate: event.candidate
+            }
+          })
+        }
+      }
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState
+        console.log(`🔗 Estado de conexión con ${fromId.slice(0, 6)}:`, state)
+        
+        if (state === 'connected') {
+          addMessage("Sistema", `✅ Conectado con otro músico`)
+          setAudioTest(`✅ Conectado a ${fromId.slice(0, 6)}`)
+        }
+        
+        if (state === 'disconnected' || state === 'failed') {
+          console.log(`⚠️ Conexión perdida con ${fromId.slice(0, 6)}`)
+          const audioEl = audioElementsRef.current.get(fromId)
+          if (audioEl) {
+            audioEl.pause()
+            audioEl.srcObject = null
+            audioElementsRef.current.delete(fromId)
+          }
+          peerConnectionsRef.current.delete(fromId)
+          setAudioTest(`⚠️ Desconectado de ${fromId.slice(0, 6)}`)
+        }
+      }
+
+      console.log('📥 Estableciendo remote description...')
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
+      console.log('📥 Remote description establecido')
       
       const answer = await pc.createAnswer()
+      console.log('📥 Answer creado')
+      
       await pc.setLocalDescription(answer)
+      console.log('📥 Local description establecido (answer)')
       
       if (channelRef.current) {
         channelRef.current.send({
@@ -766,7 +848,7 @@ export default function JamWebPage() {
         console.log('📥 Answer enviado a:', fromId)
       }
     } catch (error) {
-      console.error('Error manejando oferta:', error)
+      console.error('❌ Error manejando oferta:', error)
     }
   }
 
@@ -776,10 +858,12 @@ export default function JamWebPage() {
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
-        console.log('📥 Remote description establecido')
+        console.log('📥 Remote description establecido (answer)')
+      } else {
+        console.warn('⚠️ No se encontró peer connection para:', fromId)
       }
     } catch (error) {
-      console.error('Error manejando answer:', error)
+      console.error('❌ Error manejando answer:', error)
     }
   }
 
@@ -792,7 +876,7 @@ export default function JamWebPage() {
         console.log('🧊 ICE candidate añadido')
       }
     } catch (error) {
-      console.error('Error añadiendo ICE candidate:', error)
+      console.error('❌ Error añadiendo ICE candidate:', error)
     }
   }
 
@@ -949,7 +1033,6 @@ export default function JamWebPage() {
     const channel = supabase.channel(`jam:${roomId}`)
     channelRef.current = channel
 
-    // ✅ PRESENCE: Sincronizar participantes
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState()
       console.log('📡 Estado de presencia:', state)
@@ -972,7 +1055,6 @@ export default function JamWebPage() {
       console.log('👥 Participantes únicos:', newParticipants)
       setParticipants(newParticipants)
       
-      // ✅ Conectar con todos los participantes (incluyendo oyentes)
       const others = newParticipants.filter(p => p.id !== userIdRef.current)
       console.log(`🔗 Conectando con ${others.length} participantes`)
       
@@ -1048,7 +1130,6 @@ export default function JamWebPage() {
         if (status === 'SUBSCRIBED') {
           console.log('📡 Canal suscrito')
           
-          // ✅ Trackear presencia
           await channel.track({
             id: userIdRef.current,
             name: isListener ? '🎧 Oyente' : myName || 'Anónimo',
