@@ -1035,7 +1035,7 @@ export default function JamWebPage() {
 
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState()
-      console.log('📡 Estado de presencia:', state)
+      console.log('📡 PRESENCE SYNC:', state)
       
       const newParticipants: any[] = []
       Object.values(state).forEach((presence: any) => {
@@ -1140,9 +1140,36 @@ export default function JamWebPage() {
           
           console.log('✅ Presencia trackeada')
           
+          // ✅ Forzar sincronización inmediata
           setTimeout(() => {
-            connectToAll()
-          }, 1500)
+            const state = channel.presenceState()
+            console.log('📡 Estado de presencia después de track:', state)
+            
+            const participants = Object.values(state).flat() as any[]
+            console.log('👥 Participantes en presencia:', participants.map((p: any) => p.name))
+            
+            // ✅ Actualizar participantes manualmente
+            const newParticipants = participants.map((p: any) => ({
+              id: p.id,
+              name: p.name || 'Anónimo',
+              instrument: p.instrument || 'Sin instrumento',
+              isAdmin: p.isAdmin || false,
+              isListener: p.isListener || false
+            }))
+            
+            setParticipants(newParticipants)
+            
+            // ✅ Conectar con todos
+            const others = newParticipants.filter(p => p.id !== userIdRef.current)
+            console.log(`🔗 Conectando con ${others.length} participantes`)
+            
+            for (const p of others) {
+              if (!peerConnectionsRef.current.has(p.id)) {
+                console.log(`🔗 Creando oferta para: ${p.name}`)
+                createOffer(p.id)
+              }
+            }
+          }, 2000)
         }
       })
   }
