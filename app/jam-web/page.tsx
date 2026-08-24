@@ -1033,6 +1033,7 @@ export default function JamWebPage() {
     const channel = supabase.channel(`jam:${roomId}`)
     channelRef.current = channel
 
+    // ✅ PRESENCE: Sincronizar participantes
     channel.on('presence', { event: 'sync' }, () => {
       const state = channel.presenceState()
       console.log('📡 PRESENCE SYNC:', state)
@@ -1060,7 +1061,7 @@ export default function JamWebPage() {
       
       others.forEach(p => {
         if (!peerConnectionsRef.current.has(p.id)) {
-          console.log(`🔗 Conectando con: ${p.name} (${p.id.slice(0,6)})`)
+          console.log(`🔗 Creando oferta para: ${p.name} (${p.id.slice(0,6)})`)
           setTimeout(() => createOffer(p.id), 500)
         }
       })
@@ -1105,18 +1106,21 @@ export default function JamWebPage() {
         registerActivity()
       })
       .on('broadcast', { event: 'offer' }, ({ payload }) => {
+        console.log('📥 Broadcast offer recibido:', payload)
         if (payload.targetId === userIdRef.current) {
           handleOffer(payload.fromId, payload.offer)
         }
         registerActivity()
       })
       .on('broadcast', { event: 'answer' }, ({ payload }) => {
+        console.log('📥 Broadcast answer recibido:', payload)
         if (payload.targetId === userIdRef.current) {
           handleAnswer(payload.fromId, payload.answer)
         }
         registerActivity()
       })
       .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
+        console.log('📥 Broadcast ice-candidate recibido:', payload)
         if (payload.targetId === userIdRef.current) {
           handleIceCandidate(payload.fromId, payload.candidate)
         }
@@ -1127,20 +1131,26 @@ export default function JamWebPage() {
         registerActivity()
       })
       .subscribe(async (status) => {
+        console.log('📡 Estado del canal:', status)
+        
         if (status === 'SUBSCRIBED') {
           console.log('📡 Canal suscrito')
           
-          await channel.track({
+          // ✅ Trackear presencia
+          const trackData = {
             id: userIdRef.current,
             name: isListener ? '🎧 Oyente' : myName || 'Anónimo',
             instrument: isListener ? '🎧 Escuchando' : selectedInstrument,
             isAdmin: isAdmin,
             isListener: isListener
-          })
+          }
+          
+          console.log('📤 Trackeando presencia:', trackData)
+          await channel.track(trackData)
           
           console.log('✅ Presencia trackeada')
           
-          // ✅ Forzar sincronización inmediata
+          // ✅ Forzar sincronización con retry
           setTimeout(() => {
             const state = channel.presenceState()
             console.log('📡 Estado de presencia después de track:', state)
