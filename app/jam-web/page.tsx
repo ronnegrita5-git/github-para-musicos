@@ -1031,6 +1031,8 @@ export default function JamWebPage() {
     }
 
     console.log(`🔑 Suscribiéndose a sala: ${roomId}`)
+    console.log(`👤 Usuario: ${user?.id}, nombre: ${myName}`)
+    
     const channel = supabase.channel(`jam:${roomId}`)
     channelRef.current = channel
 
@@ -1070,6 +1072,7 @@ export default function JamWebPage() {
 
     channel
       .on('broadcast', { event: 'user-joined' }, ({ payload }) => {
+        console.log('👤 user-joined:', payload)
         addMessage("Sistema", `👤 ${payload.name} (${payload.instrument}) se unió`)
         setParticipants(prev => {
           if (!prev.find(p => p.id === payload.id)) {
@@ -1091,6 +1094,7 @@ export default function JamWebPage() {
         registerActivity()
       })
       .on('broadcast', { event: 'user-left' }, ({ payload }) => {
+        console.log('👤 user-left:', payload)
         addMessage("Sistema", `👤 ${payload.name} salió`)
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
         const pc = peerConnectionsRef.current.get(payload.id)
@@ -1137,9 +1141,12 @@ export default function JamWebPage() {
         if (status === 'SUBSCRIBED') {
           console.log('📡 Canal suscrito')
           
-          // ✅ Trackear presencia con ID único
+          // ✅ USAR EL ID DEL USUARIO DE SUPABASE
+          const userId = user?.id || `local-${Date.now()}`
+          userIdRef.current = userId
+          
           const trackData = {
-            id: userIdRef.current,
+            id: userId,
             name: isListener ? '🎧 Oyente' : myName || 'Anónimo',
             instrument: isListener ? '🎧 Escuchando' : selectedInstrument,
             isAdmin: isAdmin,
@@ -1156,11 +1163,11 @@ export default function JamWebPage() {
             const state = channel.presenceState()
             console.log('📡 Estado de presencia después de track:', state)
             
-            const participants = Object.values(state).flat() as any[]
-            console.log('👥 Participantes en presencia:', participants.map((p: any) => p.name))
+            const participantsList = Object.values(state).flat() as any[]
+            console.log('👥 Participantes en presencia:', participantsList.map((p: any) => p.name))
             
             // ✅ Actualizar participantes manualmente
-            const newParticipants = participants.map((p: any) => ({
+            const newParticipants = participantsList.map((p: any) => ({
               id: p.id,
               name: p.name || 'Anónimo',
               instrument: p.instrument || 'Sin instrumento',
