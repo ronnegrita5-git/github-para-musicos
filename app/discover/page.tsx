@@ -311,8 +311,11 @@ export default function DiscoverPage() {
   const connectToRoom = async (sessionId: string) => {
     try {
       console.log('🔍 Conectando a sala:', sessionId)
-      userIdRef.current = user?.id || `listener-${Date.now()}`
-      console.log('🔍 userId:', userIdRef.current)
+      
+      // ✅ USAR EL ID DEL USUARIO DE SUPABASE
+      const userId = user?.id || `listener-${Date.now()}`
+      userIdRef.current = userId
+      console.log('🔍 userId:', userId)
       
       peerConnectionsRef.current.forEach((pc) => pc.close())
       peerConnectionsRef.current.clear()
