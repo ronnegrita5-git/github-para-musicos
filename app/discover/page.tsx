@@ -26,10 +26,12 @@ export default function DiscoverPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [filterCategory, setFilterCategory] = useState<string>("all")
   
+  // ✅ LISTENER: solo recibe audio, no envía
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const channelRef = useRef<any>(null)
   const userIdRef = useRef<string>("")
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidate[]>>(new Map())
 
   const CATEGORIES: Record<string, { name: string; emoji: string }> = {
     'all': { name: 'Todas', emoji: '🎵' },
@@ -89,7 +91,7 @@ export default function DiscoverPage() {
     loadSessions()
   }, [filterCategory, searchTerm])
 
-  // ============ WEBRTC ============
+  // ============ WEBRTC - LISTENER ============
   const PEER_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -105,6 +107,7 @@ export default function DiscoverPage() {
       pc.close()
       peerConnectionsRef.current.delete(targetId)
     }
+    pendingCandidatesRef.current.delete(targetId)
     const audioEl = audioElementsRef.current.get(targetId)
     if (audioEl) {
       audioEl.pause()
@@ -113,120 +116,88 @@ export default function DiscoverPage() {
     }
   }
 
-  const createPeerConnection = (targetId: string) => {
-    console.log(`🔗 Creando conexión con: ${targetId}`)
-    const pc = new RTCPeerConnection(PEER_CONFIG)
-    peerConnectionsRef.current.set(targetId, pc)
-
-    console.log('📤 Oyente - no añadiendo tracks')
-
-    pc.ontrack = (event) => {
-      console.log(`📥 Audio remoto recibido de: ${targetId}`)
-      console.log(`📥 Streams: ${event.streams.length}, Tracks: ${event.streams[0]?.getTracks().length}`)
+  // ✅ LISTENER: maneja oferta del publisher
+  const handleOfferFromPublisher = async (fromId: string, offer: RTCSessionDescriptionInit) => {
+    try {
+      console.log('🎧 Oyente - manejando oferta del publisher:', fromId)
       
-      let audioEl = audioElementsRef.current.get(targetId)
-      if (!audioEl) {
-        audioEl = new Audio()
-        audioEl.autoplay = true
-        audioEl.volume = 1.0
-        audioElementsRef.current.set(targetId, audioEl)
-        console.log('🔊 Nuevo elemento de audio creado para:', targetId)
+      if (peerConnectionsRef.current.has(fromId)) {
+        console.log(`⚠️ Ya existe conexión con ${fromId}`)
+        return
       }
       
-      try {
+      const pc = new RTCPeerConnection(PEER_CONFIG)
+      peerConnectionsRef.current.set(fromId, pc)
+      pendingCandidatesRef.current.set(fromId, [])
+
+      // ✅ Oyente NO añade tracks (solo recibe audio)
+
+      pc.ontrack = (event) => {
+        console.log(`📥 Audio remoto recibido de: ${fromId}`)
+        let audioEl = audioElementsRef.current.get(fromId)
+        if (!audioEl) {
+          audioEl = new Audio()
+          audioEl.autoplay = true
+          audioEl.volume = 1.0
+          audioElementsRef.current.set(fromId, audioEl)
+          console.log('🔊 Nuevo elemento de audio creado para:', fromId)
+        }
         audioEl.srcObject = event.streams[0]
         audioEl.play().then(() => {
-          console.log(`✅ Audio reproduciéndose para: ${targetId}`)
+          console.log(`✅ Audio reproduciéndose para: ${fromId}`)
           setAudioTest(`🔊 Escuchando`)
         }).catch(e => {
           console.log('❌ Error playing audio:', e)
           setAudioTest(`❌ Error al reproducir`)
         })
-      } catch (e) {
-        console.error('❌ Error asignando srcObject:', e)
       }
-    }
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate && channelRef.current) {
-        console.log('🧊 ICE candidate enviado a:', targetId)
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'ice-candidate',
-          payload: {
-            fromId: userIdRef.current,
-            targetId: targetId,
-            candidate: event.candidate
-          }
-        })
+      pc.onicecandidate = (event) => {
+        if (event.candidate && channelRef.current) {
+          console.log('🧊 ICE candidate enviado a:', fromId)
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'ice-candidate',
+            payload: {
+              fromId: userIdRef.current,
+              targetId: fromId,
+              candidate: event.candidate
+            }
+          })
+        }
       }
-    }
 
-    pc.onconnectionstatechange = () => {
-      const state = pc.connectionState
-      console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, state)
-      
-      if (state === 'connected') {
-        setAudioTest(`✅ Conectado`)
-        console.log('✅ Conexión establecida correctamente')
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState
+        console.log(`🔗 Estado de conexión con ${fromId.slice(0, 6)}:`, state)
+        
+        if (state === 'connected') {
+          setAudioTest(`✅ Conectado`)
+          console.log('✅ Conexión establecida correctamente')
+        }
+        
+        if (state === 'disconnected' || state === 'failed') {
+          console.log(`⚠️ Conexión perdida con ${fromId.slice(0, 6)}`)
+          cleanupPeerConnection(fromId)
+          setAudioTest(`⚠️ Desconectado`)
+        }
       }
-      
-      if (state === 'disconnected' || state === 'failed') {
-        console.log(`⚠️ Conexión perdida con ${targetId.slice(0, 6)}`)
-        cleanupPeerConnection(targetId)
-        setAudioTest(`⚠️ Desconectado`)
-      }
-    }
 
-    return pc
-  }
-
-  const createOffer = async (targetId: string) => {
-    try {
-      console.log(`📤 Creando oferta para: ${targetId}`)
-      
-      if (peerConnectionsRef.current.has(targetId)) {
-        console.log(`⚠️ Ya existe conexión con ${targetId}`)
-        return
-      }
-      
-      const pc = createPeerConnection(targetId)
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: false
-      })
-      
-      console.log('📤 Oferta creada, estableciendo local description...')
-      await pc.setLocalDescription(offer)
-      console.log('📤 Local description establecido')
-      
-      if (channelRef.current) {
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'offer',
-          payload: {
-            fromId: userIdRef.current,
-            targetId: targetId,
-            offer: offer
-          }
-        })
-        console.log('📤 Oferta enviada a:', targetId)
-      } else {
-        console.error('❌ No hay canal para enviar la oferta')
-      }
-    } catch (error) {
-      console.error('❌ Error creando oferta:', error)
-    }
-  }
-
-  const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
-    try {
-      console.log('📥 Oferta recibida de:', fromId)
-      const pc = createPeerConnection(fromId)
-      
       console.log('📥 Estableciendo remote description...')
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
       console.log('📥 Remote description establecido')
+      
+      // ✅ Aplicar candidatos pendientes
+      const pending = pendingCandidatesRef.current.get(fromId) || []
+      for (const candidate of pending) {
+        try {
+          await pc.addIceCandidate(candidate)
+          console.log('🧊 Candidato pendiente añadido')
+        } catch (e) {
+          console.log('Error añadiendo candidato pendiente:', e)
+        }
+      }
+      pendingCandidatesRef.current.set(fromId, [])
       
       const answer = await pc.createAnswer()
       console.log('📥 Answer creado')
@@ -247,22 +218,8 @@ export default function DiscoverPage() {
         console.log('📥 Answer enviado a:', fromId)
       }
     } catch (error) {
-      console.error('❌ Error manejando oferta:', error)
-    }
-  }
-
-  const handleAnswer = async (fromId: string, answer: RTCSessionDescriptionInit) => {
-    try {
-      console.log('📥 Answer recibido de:', fromId)
-      const pc = peerConnectionsRef.current.get(fromId)
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer))
-        console.log('📥 Remote description establecido (answer)')
-      } else {
-        console.warn('⚠️ No se encontró peer connection para:', fromId)
-      }
-    } catch (error) {
-      console.error('❌ Error manejando answer:', error)
+      console.error('❌ Error manejando oferta del publisher:', error)
+      setAudioTest(`❌ Error al conectar`)
     }
   }
 
@@ -271,39 +228,22 @@ export default function DiscoverPage() {
       console.log('🧊 ICE candidate recibido de:', fromId)
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate))
-        console.log('🧊 ICE candidate añadido')
+        // ✅ Si ya tiene remote description, añadir directamente
+        if (pc.remoteDescription) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate))
+          console.log('🧊 ICE candidate añadido')
+        } else {
+          // ✅ Guardar en cola para cuando llegue remote description
+          console.log('🧊 ICE candidate guardado en cola (remote description no listo)')
+          const pending = pendingCandidatesRef.current.get(fromId) || []
+          pending.push(new RTCIceCandidate(candidate))
+          pendingCandidatesRef.current.set(fromId, pending)
+        }
+      } else {
+        console.warn('⚠️ No se encontró peer connection para:', fromId)
       }
     } catch (error) {
       console.error('❌ Error añadiendo ICE candidate:', error)
-    }
-  }
-
-  const connectToAll = async () => {
-    if (!channelRef.current) {
-      console.warn('⚠️ No hay canal para conectar')
-      return
-    }
-    
-    try {
-      const presenceState = channelRef.current.presenceState()
-      console.log('📡 Estado de presencia:', presenceState)
-      
-      const participants = Object.values(presenceState).flat() as any[]
-      const others = participants.filter((p: any) => p.id !== userIdRef.current)
-      
-      console.log(`🔗 Conectando con ${others.length} participantes:`, others.map((p: any) => p.name))
-      
-      for (const p of others) {
-        if (!peerConnectionsRef.current.has(p.id)) {
-          console.log(`🔗 Creando oferta para: ${p.name} (${p.id.slice(0,6)})`)
-          await createOffer(p.id)
-        } else {
-          console.log(`⏭️ Ya conectado con: ${p.name}`)
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error en connectToAll:', error)
     }
   }
 
@@ -312,13 +252,14 @@ export default function DiscoverPage() {
     try {
       console.log('🔍 Conectando a sala:', sessionId)
       
-      // ✅ USAR EL ID DEL USUARIO DE SUPABASE
       const userId = user?.id || `listener-${Date.now()}`
       userIdRef.current = userId
       console.log('🔍 userId:', userId)
       
+      // Limpiar conexiones anteriores
       peerConnectionsRef.current.forEach((pc) => pc.close())
       peerConnectionsRef.current.clear()
+      pendingCandidatesRef.current.clear()
       audioElementsRef.current.forEach((audio) => {
         audio.pause()
         audio.srcObject = null
@@ -332,13 +273,7 @@ export default function DiscoverPage() {
         .on('broadcast', { event: 'offer' }, ({ payload }) => {
           console.log('🔍 Oferta recibida:', payload)
           if (payload.targetId === userIdRef.current) {
-            handleOffer(payload.fromId, payload.offer)
-          }
-        })
-        .on('broadcast', { event: 'answer' }, ({ payload }) => {
-          console.log('🔍 Answer recibido:', payload)
-          if (payload.targetId === userIdRef.current) {
-            handleAnswer(payload.fromId, payload.answer)
+            handleOfferFromPublisher(payload.fromId, payload.offer)
           }
         })
         .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
@@ -361,12 +296,8 @@ export default function DiscoverPage() {
               isListener: true
             })
             
-            console.log('✅ Presencia trackeada')
-            
-            setTimeout(() => {
-              console.log('🔍 Conectando a todos...')
-              connectToAll()
-            }, 2000)
+            console.log('✅ Presencia trackeada - esperando oferta del publisher')
+            setAudioTest(`🎧 Esperando audio...`)
           }
         })
 
@@ -417,6 +348,7 @@ export default function DiscoverPage() {
     
     peerConnectionsRef.current.forEach((pc) => pc.close())
     peerConnectionsRef.current.clear()
+    pendingCandidatesRef.current.clear()
     
     audioElementsRef.current.forEach((audio) => {
       audio.pause()

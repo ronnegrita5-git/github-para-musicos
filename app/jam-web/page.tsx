@@ -270,7 +270,7 @@ function AudioEffects({ stream }: { stream: MediaStream | null }) {
   )
 }
 
-// ============ COMPONENTE PRINCIPAL ============
+// ============ COMPONENTE PRINCIPAL - PUBLISHER ============
 export default function JamWebPage() {
   const { user } = useAuth()
   
@@ -287,7 +287,6 @@ export default function JamWebPage() {
   const [selectedCategory, setSelectedCategory] = useState<CategoryKey | null>(null)
   const [selectedInstrument, setSelectedInstrument] = useState<string>("")
   const [roomCategory, setRoomCategory] = useState<string>("")
-  const [isListener, setIsListener] = useState(false)
   
   // Estado de la Jam
   const [messages, setMessages] = useState<any[]>([])
@@ -311,6 +310,7 @@ export default function JamWebPage() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const monitorGainRef = useRef<GainNode | null>(null)
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidate[]>>(new Map())
   
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const lastHeartbeatRef = useRef<number>(Date.now())
@@ -447,6 +447,7 @@ export default function JamWebPage() {
     
     peerConnectionsRef.current.forEach(pc => pc.close())
     peerConnectionsRef.current.clear()
+    pendingCandidatesRef.current.clear()
     
     audioElementsRef.current.forEach(audio => {
       audio.pause()
@@ -482,7 +483,6 @@ export default function JamWebPage() {
     setMessages([])
     setIsMuted(false)
     setIsAdmin(false)
-    setIsListener(false)
     setRoomCategory("")
     setAudioTest("")
     setInactivityWarning(false)
@@ -647,7 +647,86 @@ export default function JamWebPage() {
     }
   }
 
-  // ============ WEBRTC ============
+  // ============ WEBRTC - PUBLISHER ============
+  const createPeerConnection = (targetId: string) => {
+    console.log(`🔗 Creando conexión con: ${targetId}`)
+    const pc = new RTCPeerConnection(PEER_CONFIG)
+    peerConnectionsRef.current.set(targetId, pc)
+    pendingCandidatesRef.current.set(targetId, [])
+
+    // ✅ Añadir tracks locales (siempre, porque soy publisher)
+    if (localStreamRef.current) {
+      console.log('📤 Añadiendo tracks de audio a la conexión')
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current!)
+        console.log(`📤 Track añadido: ${track.kind}`)
+      })
+    }
+
+    pc.ontrack = (event) => {
+      console.log(`📥 Audio remoto recibido de: ${targetId}`)
+      let audioEl = audioElementsRef.current.get(targetId)
+      if (!audioEl) {
+        audioEl = new Audio()
+        audioEl.autoplay = true
+        audioEl.volume = 1.0
+        audioElementsRef.current.set(targetId, audioEl)
+        console.log('🔊 Nuevo elemento de audio creado para:', targetId)
+      }
+      audioEl.srcObject = event.streams[0]
+      audioEl.play().catch(e => console.log('Error playing audio:', e))
+      addMessage("Sistema", `🔊 Audio recibido de ${targetId.slice(0, 6)}`)
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && channelRef.current) {
+        console.log('🧊 ICE candidate enviado a:', targetId)
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'ice-candidate',
+          payload: {
+            fromId: userIdRef.current,
+            targetId: targetId,
+            candidate: event.candidate
+          }
+        })
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState
+      console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, state)
+      
+      if (state === 'connected') {
+        addMessage("Sistema", `✅ Conectado con ${targetId.slice(0, 6)}`)
+        setAudioTest(`✅ Conectado`)
+      }
+      
+      if (state === 'disconnected' || state === 'failed') {
+        console.log(`⚠️ Conexión perdida con ${targetId.slice(0, 6)}`)
+        cleanupPeerConnection(targetId)
+      }
+    }
+
+    return pc
+  }
+
+  const cleanupPeerConnection = (targetId: string) => {
+    const pc = peerConnectionsRef.current.get(targetId)
+    if (pc) {
+      pc.close()
+      peerConnectionsRef.current.delete(targetId)
+    }
+    pendingCandidatesRef.current.delete(targetId)
+    const audioEl = audioElementsRef.current.get(targetId)
+    if (audioEl) {
+      audioEl.pause()
+      audioEl.srcObject = null
+      audioElementsRef.current.delete(targetId)
+    }
+  }
+
+  // ✅ PUBLISHER: Siempre crea ofertas (el oyente nunca crea ofertas)
   const createOffer = async (targetId: string) => {
     try {
       console.log(`📤 Creando oferta para: ${targetId}`)
@@ -662,67 +741,8 @@ export default function JamWebPage() {
         return
       }
       
-      const pc = new RTCPeerConnection(PEER_CONFIG)
-      peerConnectionsRef.current.set(targetId, pc)
-
-      console.log('📤 Añadiendo tracks de audio a la conexión')
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current!)
-        console.log(`📤 Track añadido: ${track.kind}`)
-      })
-
-      pc.ontrack = (event) => {
-        console.log(`📥 Audio remoto recibido de: ${targetId}`)
-        let audioEl = audioElementsRef.current.get(targetId)
-        if (!audioEl) {
-          audioEl = new Audio()
-          audioEl.autoplay = true
-          audioEl.volume = 1.0
-          audioElementsRef.current.set(targetId, audioEl)
-          console.log('🔊 Nuevo elemento de audio creado para:', targetId)
-        }
-        audioEl.srcObject = event.streams[0]
-        audioEl.play().catch(e => console.log('Error playing audio:', e))
-        addMessage("Sistema", `🔊 Audio recibido de ${targetId.slice(0, 6)}`)
-      }
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate && channelRef.current) {
-          console.log('🧊 ICE candidate enviado a:', targetId)
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'ice-candidate',
-            payload: {
-              fromId: userIdRef.current,
-              targetId: targetId,
-              candidate: event.candidate
-            }
-          })
-        }
-      }
-
-      pc.onconnectionstatechange = () => {
-        const state = pc.connectionState
-        console.log(`🔗 Estado de conexión con ${targetId.slice(0, 6)}:`, state)
-        
-        if (state === 'connected') {
-          addMessage("Sistema", `✅ Conectado con otro músico`)
-          setAudioTest(`✅ Conectado a ${targetId.slice(0, 6)}`)
-        }
-        
-        if (state === 'disconnected' || state === 'failed') {
-          console.log(`⚠️ Conexión perdida con ${targetId.slice(0, 6)}`)
-          const audioEl = audioElementsRef.current.get(targetId)
-          if (audioEl) {
-            audioEl.pause()
-            audioEl.srcObject = null
-            audioElementsRef.current.delete(targetId)
-          }
-          peerConnectionsRef.current.delete(targetId)
-          setAudioTest(`⚠️ Desconectado de ${targetId.slice(0, 6)}`)
-        }
-      }
-
+      const pc = createPeerConnection(targetId)
+      
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: false
@@ -731,6 +751,15 @@ export default function JamWebPage() {
       console.log('📤 Oferta creada, estableciendo local description...')
       await pc.setLocalDescription(offer)
       console.log('📤 Local description establecido')
+      
+      // ✅ Enviar candidatos pendientes
+      const pending = pendingCandidatesRef.current.get(targetId) || []
+      for (const candidate of pending) {
+        try {
+          await pc.addIceCandidate(candidate)
+        } catch (e) {}
+      }
+      pendingCandidatesRef.current.set(targetId, [])
       
       if (channelRef.current) {
         channelRef.current.send({
@@ -752,104 +781,8 @@ export default function JamWebPage() {
   }
 
   const handleOffer = async (fromId: string, offer: RTCSessionDescriptionInit) => {
-    try {
-      console.log('📥 Oferta recibida de:', fromId)
-      
-      if (!isListener && !localStreamRef.current) {
-        console.error('❌ No hay stream local para responder')
-        return
-      }
-      
-      const pc = new RTCPeerConnection(PEER_CONFIG)
-      peerConnectionsRef.current.set(fromId, pc)
-
-      if (!isListener && localStreamRef.current) {
-        console.log('📤 Añadiendo tracks locales a la respuesta')
-        localStreamRef.current.getTracks().forEach(track => {
-          pc.addTrack(track, localStreamRef.current!)
-          console.log(`📤 Track añadido: ${track.kind}`)
-        })
-      } else {
-        console.log('📤 No añadiendo tracks (soy oyente)')
-      }
-
-      pc.ontrack = (event) => {
-        console.log(`📥 Audio remoto recibido de: ${fromId}`)
-        let audioEl = audioElementsRef.current.get(fromId)
-        if (!audioEl) {
-          audioEl = new Audio()
-          audioEl.autoplay = true
-          audioEl.volume = 1.0
-          audioElementsRef.current.set(fromId, audioEl)
-          console.log('🔊 Nuevo elemento de audio creado para:', fromId)
-        }
-        audioEl.srcObject = event.streams[0]
-        audioEl.play().catch(e => console.log('Error playing audio:', e))
-        addMessage("Sistema", `🔊 Audio recibido de ${fromId.slice(0, 6)}`)
-      }
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate && channelRef.current) {
-          console.log('🧊 ICE candidate enviado a:', fromId)
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'ice-candidate',
-            payload: {
-              fromId: userIdRef.current,
-              targetId: fromId,
-              candidate: event.candidate
-            }
-          })
-        }
-      }
-
-      pc.onconnectionstatechange = () => {
-        const state = pc.connectionState
-        console.log(`🔗 Estado de conexión con ${fromId.slice(0, 6)}:`, state)
-        
-        if (state === 'connected') {
-          addMessage("Sistema", `✅ Conectado con otro músico`)
-          setAudioTest(`✅ Conectado a ${fromId.slice(0, 6)}`)
-        }
-        
-        if (state === 'disconnected' || state === 'failed') {
-          console.log(`⚠️ Conexión perdida con ${fromId.slice(0, 6)}`)
-          const audioEl = audioElementsRef.current.get(fromId)
-          if (audioEl) {
-            audioEl.pause()
-            audioEl.srcObject = null
-            audioElementsRef.current.delete(fromId)
-          }
-          peerConnectionsRef.current.delete(fromId)
-          setAudioTest(`⚠️ Desconectado de ${fromId.slice(0, 6)}`)
-        }
-      }
-
-      console.log('📥 Estableciendo remote description...')
-      await pc.setRemoteDescription(new RTCSessionDescription(offer))
-      console.log('📥 Remote description establecido')
-      
-      const answer = await pc.createAnswer()
-      console.log('📥 Answer creado')
-      
-      await pc.setLocalDescription(answer)
-      console.log('📥 Local description establecido (answer)')
-      
-      if (channelRef.current) {
-        channelRef.current.send({
-          type: 'broadcast',
-          event: 'answer',
-          payload: {
-            fromId: userIdRef.current,
-            targetId: fromId,
-            answer: answer
-          }
-        })
-        console.log('📥 Answer enviado a:', fromId)
-      }
-    } catch (error) {
-      console.error('❌ Error manejando oferta:', error)
-    }
+    // ✅ PUBLISHER: No debería recibir ofertas, pero por si acaso
+    console.warn('⚠️ Publisher recibió oferta de', fromId, '- ignorando')
   }
 
   const handleAnswer = async (fromId: string, answer: RTCSessionDescriptionInit) => {
@@ -859,6 +792,15 @@ export default function JamWebPage() {
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
         console.log('📥 Remote description establecido (answer)')
+        
+        // ✅ Aplicar candidatos pendientes
+        const pending = pendingCandidatesRef.current.get(fromId) || []
+        for (const candidate of pending) {
+          try {
+            await pc.addIceCandidate(candidate)
+          } catch (e) {}
+        }
+        pendingCandidatesRef.current.set(fromId, [])
       } else {
         console.warn('⚠️ No se encontró peer connection para:', fromId)
       }
@@ -872,8 +814,19 @@ export default function JamWebPage() {
       console.log('🧊 ICE candidate recibido de:', fromId)
       const pc = peerConnectionsRef.current.get(fromId)
       if (pc) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate))
-        console.log('🧊 ICE candidate añadido')
+        // ✅ Si ya tiene remote description, añadir directamente
+        if (pc.remoteDescription) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate))
+          console.log('🧊 ICE candidate añadido')
+        } else {
+          // ✅ Guardar en cola para cuando llegue remote description
+          console.log('🧊 ICE candidate guardado en cola (remote description no listo)')
+          const pending = pendingCandidatesRef.current.get(fromId) || []
+          pending.push(new RTCIceCandidate(candidate))
+          pendingCandidatesRef.current.set(fromId, pending)
+        }
+      } else {
+        console.warn('⚠️ No se encontró peer connection para:', fromId)
       }
     } catch (error) {
       console.error('❌ Error añadiendo ICE candidate:', error)
@@ -882,7 +835,7 @@ export default function JamWebPage() {
 
   const connectToAll = async () => {
     const others = participants.filter(p => p.id !== userIdRef.current)
-    console.log(`🔗 Conectando con ${others.length} participantes`)
+    console.log(`🔗 Conectando con ${others.length} participantes (oyentes)`)
     for (const p of others) {
       if (!peerConnectionsRef.current.has(p.id)) {
         await createOffer(p.id)
@@ -900,7 +853,6 @@ export default function JamWebPage() {
     const newRoomId = crypto.randomUUID()
     setRoomId(newRoomId)
     setIsAdmin(true)
-    setIsListener(false)
     setSelectedCategory(category)
     setRoomCategory(category)
     userIdRef.current = user?.id || `local-${Date.now()}`
@@ -949,41 +901,19 @@ export default function JamWebPage() {
       id: userIdRef.current, 
       name: myName || user?.email || 'Anónimo',
       instrument: selectedInstrument,
-      isAdmin: true
+      isAdmin: true,
+      isListener: false
     }])
     
     addMessage("Sistema", `👑 ${myName} creó la sala (${visibility})`)
-    subscribeToRoom(newRoomId, category)
+    // ✅ Pasar el rol explícitamente
+    subscribeToRoom(newRoomId, category, {
+      isAdmin: true,
+      isListener: false
+    })
     
     if (isAdmin) {
       loadRequests(newRoomId)
-    }
-    
-    registerActivity()
-  }
-
-  const joinAsListener = async (sessionId: string) => {
-    if (!user) {
-      alert('Debes iniciar sesión para escuchar')
-      return
-    }
-
-    setIsAdmin(false)
-    setIsListener(true)
-    userIdRef.current = user?.id || `local-${Date.now()}`
-    setRoomId(sessionId)
-    
-    setIsInRoom(true)
-    setView('room')
-    setParticipants([])
-    
-    addMessage("Sistema", `🎧 ${myName} está escuchando la Jam`)
-    subscribeToRoom(sessionId, 'moderna')
-    
-    const session = publicSessions.find(s => s.id === sessionId)
-    if (session) {
-      setRoomName(session.name || sessionId.slice(0, 6))
-      setRoomCategory(session.category || 'moderna')
     }
     
     registerActivity()
@@ -1005,7 +935,6 @@ export default function JamWebPage() {
     }
 
     setIsAdmin(false)
-    setIsListener(false)
     userIdRef.current = user?.id || `local-${Date.now()}`
     
     const ok = await startLocalStream()
@@ -1017,21 +946,29 @@ export default function JamWebPage() {
       id: userIdRef.current, 
       name: myName || user?.email || 'Anónimo',
       instrument: selectedInstrument,
-      isAdmin: false
+      isAdmin: false,
+      isListener: false
     }])
     addMessage("Sistema", `🎵 ${myName} se unió`)
-    subscribeToRoom(sessionId, session?.category || 'moderna')
+    // ✅ Pasar el rol explícitamente
+    subscribeToRoom(sessionId, session?.category || 'moderna', {
+      isAdmin: false,
+      isListener: false
+    })
     
     registerActivity()
   }
 
-  const subscribeToRoom = (roomId: string, category: string) => {
+  const subscribeToRoom = (roomId: string, category: string, role: { isAdmin: boolean, isListener: boolean }) => {
     if (channelRef.current) {
       channelRef.current.unsubscribe()
     }
 
-    console.log(`🔑 Suscribiéndose a sala: ${roomId}`)
-    console.log(`👤 Usuario: ${user?.id}, nombre: ${myName}`)
+    console.log(`🔑 Suscribiéndose a sala: ${roomId} con rol:`, role)
+    
+    const userId = user?.id || `local-${Date.now()}`
+    userIdRef.current = userId
+    console.log(`👤 Usuario ID: ${userId}`)
     
     const channel = supabase.channel(`jam:${roomId}`)
     channelRef.current = channel
@@ -1059,15 +996,21 @@ export default function JamWebPage() {
       console.log('👥 Participantes únicos:', newParticipants)
       setParticipants(newParticipants)
       
-      const others = newParticipants.filter(p => p.id !== userIdRef.current)
-      console.log(`🔗 Conectando con ${others.length} participantes`)
-      
-      others.forEach(p => {
-        if (!peerConnectionsRef.current.has(p.id)) {
-          console.log(`🔗 Creando oferta para: ${p.name} (${p.id.slice(0,6)})`)
-          setTimeout(() => createOffer(p.id), 500)
-        }
-      })
+      // ✅ SOLO EL PUBLISHER (admin o músico) CREA OFERTAS
+      const isPublisher = !role.isListener
+      if (isPublisher) {
+        const others = newParticipants.filter(p => p.id !== userIdRef.current)
+        console.log(`🔗 Conectando con ${others.length} participantes (oyentes)`)
+        
+        others.forEach(p => {
+          if (!peerConnectionsRef.current.has(p.id)) {
+            console.log(`🔗 Creando oferta para: ${p.name} (${p.id.slice(0,6)})`)
+            setTimeout(() => createOffer(p.id), 500)
+          }
+        })
+      } else {
+        console.log('🎧 Modo oyente - esperando ofertas del publisher')
+      }
     })
 
     channel
@@ -1086,34 +1029,34 @@ export default function JamWebPage() {
           }
           return prev
         })
-        setTimeout(() => {
-          if (payload.id !== userIdRef.current && !peerConnectionsRef.current.has(payload.id)) {
-            createOffer(payload.id)
-          }
-        }, 1000)
+        
+        // ✅ Si soy publisher y alguien se une, crear oferta
+        const isPublisher = !role.isListener
+        if (isPublisher && payload.id !== userIdRef.current) {
+          setTimeout(() => {
+            if (!peerConnectionsRef.current.has(payload.id)) {
+              createOffer(payload.id)
+            }
+          }, 1000)
+        }
         registerActivity()
       })
       .on('broadcast', { event: 'user-left' }, ({ payload }) => {
         console.log('👤 user-left:', payload)
         addMessage("Sistema", `👤 ${payload.name} salió`)
         setParticipants(prev => prev.filter(p => p.id !== payload.id))
-        const pc = peerConnectionsRef.current.get(payload.id)
-        if (pc) { 
-          pc.close()
-          peerConnectionsRef.current.delete(payload.id)
-        }
-        const audioEl = audioElementsRef.current.get(payload.id)
-        if (audioEl) {
-          audioEl.pause()
-          audioEl.srcObject = null
-          audioElementsRef.current.delete(payload.id)
-        }
+        cleanupPeerConnection(payload.id)
         registerActivity()
       })
       .on('broadcast', { event: 'offer' }, ({ payload }) => {
         console.log('📥 Broadcast offer recibido:', payload)
         if (payload.targetId === userIdRef.current) {
-          handleOffer(payload.fromId, payload.offer)
+          // ✅ Si soy oyente, manejo la oferta
+          if (role.isListener) {
+            handleOfferFromPublisher(payload.fromId, payload.offer)
+          } else {
+            console.warn('⚠️ Publisher recibió oferta - ignorando')
+          }
         }
         registerActivity()
       })
@@ -1141,16 +1084,12 @@ export default function JamWebPage() {
         if (status === 'SUBSCRIBED') {
           console.log('📡 Canal suscrito')
           
-          // ✅ USAR EL ID DEL USUARIO DE SUPABASE
-          const userId = user?.id || `local-${Date.now()}`
-          userIdRef.current = userId
-          
           const trackData = {
-            id: userId,
-            name: isListener ? '🎧 Oyente' : myName || 'Anónimo',
-            instrument: isListener ? '🎧 Escuchando' : selectedInstrument,
-            isAdmin: isAdmin,
-            isListener: isListener
+            id: userIdRef.current,
+            name: role.isListener ? '🎧 Oyente' : myName || 'Anónimo',
+            instrument: role.isListener ? '🎧 Escuchando' : selectedInstrument,
+            isAdmin: role.isAdmin,
+            isListener: role.isListener
           }
           
           console.log('📤 Trackeando presencia:', trackData)
@@ -1158,38 +1097,128 @@ export default function JamWebPage() {
           
           console.log('✅ Presencia trackeada')
           
-          // ✅ Forzar sincronización después de 1s
-          setTimeout(() => {
-            const state = channel.presenceState()
-            console.log('📡 Estado de presencia después de track:', state)
-            
-            const participantsList = Object.values(state).flat() as any[]
-            console.log('👥 Participantes en presencia:', participantsList.map((p: any) => p.name))
-            
-            // ✅ Actualizar participantes manualmente
-            const newParticipants = participantsList.map((p: any) => ({
-              id: p.id,
-              name: p.name || 'Anónimo',
-              instrument: p.instrument || 'Sin instrumento',
-              isAdmin: p.isAdmin || false,
-              isListener: p.isListener || false
-            }))
-            
-            setParticipants(newParticipants)
-            
-            // ✅ Conectar con todos
-            const others = newParticipants.filter(p => p.id !== userIdRef.current)
-            console.log(`🔗 Conectando con ${others.length} participantes`)
-            
-            for (const p of others) {
-              if (!peerConnectionsRef.current.has(p.id)) {
-                console.log(`🔗 Creando oferta para: ${p.name}`)
-                createOffer(p.id)
+          // ✅ Si soy publisher, conectar con participantes existentes
+          const isPublisher = !role.isListener
+          if (isPublisher) {
+            setTimeout(() => {
+              const state = channel.presenceState()
+              console.log('📡 Estado de presencia después de track:', state)
+              
+              const participantsList = Object.values(state).flat() as any[]
+              console.log('👥 Participantes en presencia:', participantsList.map((p: any) => p.name))
+              
+              const newParticipants = participantsList.map((p: any) => ({
+                id: p.id,
+                name: p.name || 'Anónimo',
+                instrument: p.instrument || 'Sin instrumento',
+                isAdmin: p.isAdmin || false,
+                isListener: p.isListener || false
+              }))
+              
+              setParticipants(newParticipants)
+              
+              const others = newParticipants.filter(p => p.id !== userIdRef.current)
+              console.log(`🔗 Conectando con ${others.length} participantes`)
+              
+              for (const p of others) {
+                if (!peerConnectionsRef.current.has(p.id)) {
+                  console.log(`🔗 Creando oferta para: ${p.name}`)
+                  createOffer(p.id)
+                }
               }
-            }
-          }, 1000)
+            }, 1000)
+          }
         }
       })
+  }
+
+  // ✅ LISTENER: Manejar oferta del publisher
+  const handleOfferFromPublisher = async (fromId: string, offer: RTCSessionDescriptionInit) => {
+    try {
+      console.log('🎧 Oyente - manejando oferta del publisher:', fromId)
+      
+      const pc = new RTCPeerConnection(PEER_CONFIG)
+      peerConnectionsRef.current.set(fromId, pc)
+      pendingCandidatesRef.current.set(fromId, [])
+
+      // ✅ Oyente NO añade tracks
+
+      pc.ontrack = (event) => {
+        console.log(`📥 Audio remoto recibido de: ${fromId}`)
+        let audioEl = audioElementsRef.current.get(fromId)
+        if (!audioEl) {
+          audioEl = new Audio()
+          audioEl.autoplay = true
+          audioEl.volume = 1.0
+          audioElementsRef.current.set(fromId, audioEl)
+          console.log('🔊 Nuevo elemento de audio creado para:', fromId)
+        }
+        audioEl.srcObject = event.streams[0]
+        audioEl.play().catch(e => console.log('Error playing audio:', e))
+        addMessage("Sistema", `🔊 Audio recibido de ${fromId.slice(0, 6)}`)
+        setAudioTest(`🔊 Escuchando`)
+      }
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && channelRef.current) {
+          console.log('🧊 ICE candidate enviado a:', fromId)
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'ice-candidate',
+            payload: {
+              fromId: userIdRef.current,
+              targetId: fromId,
+              candidate: event.candidate
+            }
+          })
+        }
+      }
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState
+        console.log(`🔗 Estado de conexión con ${fromId.slice(0, 6)}:`, state)
+        if (state === 'connected') {
+          setAudioTest(`✅ Conectado`)
+        }
+        if (state === 'disconnected' || state === 'failed') {
+          cleanupPeerConnection(fromId)
+        }
+      }
+
+      console.log('📥 Estableciendo remote description...')
+      await pc.setRemoteDescription(new RTCSessionDescription(offer))
+      console.log('📥 Remote description establecido')
+      
+      // ✅ Aplicar candidatos pendientes
+      const pending = pendingCandidatesRef.current.get(fromId) || []
+      for (const candidate of pending) {
+        try {
+          await pc.addIceCandidate(candidate)
+        } catch (e) {}
+      }
+      pendingCandidatesRef.current.set(fromId, [])
+      
+      const answer = await pc.createAnswer()
+      console.log('📥 Answer creado')
+      
+      await pc.setLocalDescription(answer)
+      console.log('📥 Local description establecido (answer)')
+      
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'answer',
+          payload: {
+            fromId: userIdRef.current,
+            targetId: fromId,
+            answer: answer
+          }
+        })
+        console.log('📥 Answer enviado a:', fromId)
+      }
+    } catch (error) {
+      console.error('❌ Error manejando oferta del publisher:', error)
+    }
   }
 
   const toggleMute = () => {
@@ -1396,20 +1425,15 @@ export default function JamWebPage() {
                   </div>
                   <div style={{ display: "flex", gap: "6px" }}>
                     {session.owner_id !== user?.id && (
-                      <>
-                        <button 
-                          onClick={() => joinAsListener(session.id)} 
-                          style={{ padding: "6px 14px", background: "#8b5cf6", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
-                        >
-                          🎧 Escuchar
-                        </button>
-                        <button 
-                          onClick={() => requestToJoin(session.id)} 
-                          style={{ padding: "6px 14px", background: "#fbbf24", color: "black", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
-                        >
-                          📩 Solicitar
-                        </button>
-                      </>
+                      <button 
+                        onClick={() => {
+                          // Redirigir a discover para escuchar
+                          window.location.href = '/discover'
+                        }} 
+                        style={{ padding: "6px 14px", background: "#8b5cf6", color: "white", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
+                      >
+                        🎧 Escuchar
+                      </button>
                     )}
                     <button onClick={() => {
                       setRoomId(session.id)
@@ -1437,7 +1461,6 @@ export default function JamWebPage() {
           <span style={{ color: "#fbbf24", marginLeft: 12 }}>{roomCategory ? CATEGORIES[roomCategory as CategoryKey]?.name || roomCategory : "Sin categoría"}</span>
           <span style={{ color: "#6b7280", marginLeft: 12 }}>👥 {participants.length}</span>
           {isAdmin && <span style={{ color: "#fbbf24", marginLeft: 12 }}>👑 Admin</span>}
-          {isListener && <span style={{ color: "#8b5cf6", marginLeft: 12 }}>🎧 Oyente</span>}
           {inactivityWarning && isAdmin && (
             <span style={{ marginLeft: 12, color: "#ef4444", fontSize: 12, fontWeight: "bold" }}>⚠️ Cierre por inactividad</span>
           )}
@@ -1450,7 +1473,7 @@ export default function JamWebPage() {
           )}
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          {!isListener && (
+          {!isAdmin && (
             <>
               <button onClick={toggleMute} style={{ padding: "6px 14px", background: isMuted ? "#ef4444" : "#10b981", color: "white", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMuted ? "🔇" : "🎤"}</button>
               <button onClick={toggleMonitoring} style={{ padding: "6px 14px", background: isMonitoring ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.05)", color: isMonitoring ? "#10b981" : "#6b7280", border: isMonitoring ? "1px solid #10b981" : "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer", fontSize: 13 }}>{isMonitoring ? "🔊" : "🔇"}</button>
@@ -1555,7 +1578,7 @@ export default function JamWebPage() {
         </div>
       </div>
 
-      {!isListener && localStreamRef.current && <AudioEffects stream={localStreamRef.current} />}
+      {localStreamRef.current && <AudioEffects stream={localStreamRef.current} />}
 
       <div style={{ display: "flex", flexDirection: "column", height: "300px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)", overflow: "hidden", marginTop: "8px" }}>
         <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1578,7 +1601,6 @@ export default function JamWebPage() {
 
       <div style={{ marginTop: 12, textAlign: "center", color: "#6b7280", fontSize: 12 }}>
         💡 {roomId.slice(0, 6)} {isAdmin && '· 🔑 Eres el administrador'}
-        {isListener && '· 🎧 Estás escuchando'}
       </div>
     </div>
   )
