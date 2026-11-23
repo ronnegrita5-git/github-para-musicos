@@ -87,7 +87,7 @@ export default function JamRoomPage() {
     try {
       if (type === 'offer') {
         const offerCollision = makingOffer.current[from] || pc.signalingState !== "stable"
-        ignoreOffer.current[from] = !offerCollision || (user?.id && user.id < from)
+        ignoreOffer.current[from] = !offerCollision || Boolean(user?.id && user.id < from)
         
         if (ignoreOffer.current[from]) return
 
