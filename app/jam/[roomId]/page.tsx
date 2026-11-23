@@ -20,12 +20,14 @@ export default function JamRoomPage() {
   const [isMuted, setIsMuted] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<string>("Iniciando...")
   const [error, setError] = useState<string | null>(null)
+  const [audioReady, setAudioReady] = useState(false)
 
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnections = useRef<Record<string, RTCPeerConnection>>({})
   const channelRef = useRef<any>(null)
   const makingOffer = useRef<Record<string, boolean>>({})
   const ignoreOffer = useRef<Record<string, boolean>>({})
+  const remoteAudioRef = useRef<HTMLAudioElement>(null)
 
   const rtcConfig: RTCConfiguration = {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
@@ -44,9 +46,9 @@ export default function JamRoomPage() {
     }
 
     pc.ontrack = (event) => {
-      const remoteAudio = new Audio()
-      remoteAudio.srcObject = event.streams[0]
-      remoteAudio.play().catch(e => console.error("Error reproduciendo audio:", e))
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = event.streams[0]
+      }
     }
 
     pc.onicecandidate = (event) => {
@@ -218,6 +220,31 @@ export default function JamRoomPage() {
           ))}
         </ul>
       </div>
+
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
+
+      {!audioReady && (
+        <div style={{ marginTop: 20, padding: 15, background: "#fff3cd", borderRadius: 8 }}>
+          <p>🔊 El navegador ha bloqueado el audio. Haz clic para escuchar a los demás músicos:</p>
+          <button
+            onClick={() => {
+              remoteAudioRef.current?.play().catch(e => console.error("Error al reproducir:", e))
+              setAudioReady(true)
+            }}
+            style={{
+              padding: "10px 20px",
+              background: "#2b8a3e",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+              fontSize: 16,
+            }}
+          >
+            Habilitar audio
+          </button>
+        </div>
+      )}
 
       <div style={{ marginTop: 30 }}>
         <button
