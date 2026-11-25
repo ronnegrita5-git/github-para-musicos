@@ -1,191 +1,234 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "../../context/AuthContext"
 import Link from "next/link"
 
-type SignalPayload = 
-  | { from: string; type: 'offer'; sdp: RTCSessionDescriptionInit }
-  | { from: string; type: 'answer'; sdp: RTCSessionDescriptionInit }
-  | { from: string; type: 'candidate'; candidate: RTCIceCandidateInit }
+type SignalPayload = { from: string; to: string } & (
+  | { type: "description"; description: RTCSessionDescriptionInit }
+  | { type: "candidate"; candidate: RTCIceCandidateInit }
+)
+
+type Peer = {
+  pc: RTCPeerConnection
+  makingOffer: boolean
+  ignoreOffer: boolean
+  settingAnswer: boolean
+}
+
+// TURN opcional: se configura con variables de entorno (en Vercel y en .env.local)
+const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }]
+if (process.env.NEXT_PUBLIC_TURN_URL) {
+  iceServers.push({
+    urls: process.env.NEXT_PUBLIC_TURN_URL,
+    username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+    credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+  })
+}
+
+function RemoteAudio({ stream }: { stream: MediaStream }) {
+  const ref = useRef<HTMLAudioElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.srcObject = stream
+    el.play().catch((e) => console.warn("Reproducción bloqueada:", e))
+  }, [stream])
+
+  return <audio ref={ref} autoPlay playsInline data-remote />
+}
 
 export default function JamRoomPage() {
   const { roomId } = useParams<{ roomId: string }>()
   const { user, loading: authLoading } = useAuth()
+  const userId = user?.id
   const router = useRouter()
-  
-  const [peers, setPeers] = useState<Record<string, { instrument?: string }>>({})
+
+  const [peerIds, setPeerIds] = useState<string[]>([])
+  const [streams, setStreams] = useState<Record<string, MediaStream>>({})
+  const [states, setStates] = useState<Record<string, string>>({})
   const [isMuted, setIsMuted] = useState(false)
-  const [connectionStatus, setConnectionStatus] = useState<string>("Iniciando...")
+  const [connectionStatus, setConnectionStatus] = useState("Iniciando...")
   const [error, setError] = useState<string | null>(null)
-  const [audioReady, setAudioReady] = useState(false)
-  const [ontrackFired, setOntrackFired] = useState(false)
 
   const localStreamRef = useRef<MediaStream | null>(null)
-  const peerConnections = useRef<Record<string, RTCPeerConnection>>({})
-  const channelRef = useRef<any>(null)
-  const makingOffer = useRef<Record<string, boolean>>({})
-  const ignoreOffer = useRef<Record<string, boolean>>({})
-  const remoteAudioRef = useRef<HTMLAudioElement>(null)
-
-  const rtcConfig: RTCConfiguration = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject"
-      },
-      {
-        urls: "turn:openrelay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject"
-      }
-    ]
-  }
-
-  const getOrCreatePeerConnection = useCallback((peerId: string): RTCPeerConnection => {
-    if (peerConnections.current[peerId]) return peerConnections.current[peerId]
-
-    const pc = new RTCPeerConnection(rtcConfig)
-    peerConnections.current[peerId] = pc
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current!)
-      })
-    }
-
-    pc.ontrack = (event) => {
-      console.log("ontrack fired, streams:", event.streams)
-      setOntrackFired(true)
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = event.streams[0]
-        remoteAudioRef.current.play().catch(e => console.error("play failed:", e))
-      }
-    }
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'webrtc-signal',
-          payload: { from: user?.id, type: 'candidate', candidate: event.candidate }
-        })
-      }
-    }
-
-    pc.onnegotiationneeded = async () => {
-      try {
-        makingOffer.current[peerId] = true
-        await pc.setLocalDescription()
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'webrtc-signal',
-          payload: { from: user?.id, type: 'offer', sdp: pc.localDescription }
-        })
-      } catch (err) {
-        console.error("Error en negociación:", err)
-      } finally {
-        makingOffer.current[peerId] = false
-      }
-    }
-
-    return pc
-  }, [user?.id])
-
-  const handleSignal = useCallback(async (payload: SignalPayload) => {
-    const { from, type } = payload
-    if (from === user?.id) return
-
-    const pc = getOrCreatePeerConnection(from)
-
-    try {
-      if (type === 'offer') {
-        const offerCollision = makingOffer.current[from] || pc.signalingState !== "stable"
-        ignoreOffer.current[from] = !offerCollision || Boolean(user?.id && user.id < from)
-        
-        if (ignoreOffer.current[from]) return
-
-        await pc.setRemoteDescription(payload.sdp)
-        await pc.setLocalDescription()
-        
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'webrtc-signal',
-          payload: { from: user?.id, type: 'answer', sdp: pc.localDescription }
-        })
-      } 
-      else if (type === 'answer') {
-        await pc.setRemoteDescription(payload.sdp)
-      } 
-      else if (type === 'candidate') {
-        if (!ignoreOffer.current[from]) {
-          await pc.addIceCandidate(payload.candidate)
-        }
-      }
-    } catch (err) {
-      console.error("Error manejando señal de", from, err)
-    }
-  }, [user?.id, getOrCreatePeerConnection])
 
   useEffect(() => {
     if (authLoading) return
-    if (!user) { router.push("/login"); return }
+    if (!userId) {
+      router.push("/login")
+      return
+    }
     if (!roomId) return
 
-    let isMounted = true
+    let active = true
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let localStream: MediaStream | null = null
+    const peers = new Map<string, Peer>()
+    // Un ID por pestaña: permite probar con la misma cuenta en dos dispositivos
+    const myId = crypto.randomUUID()
+
+    setPeerIds([])
+    setStreams({})
+    setStates({})
+    setIsMuted(false)
+    setError(null)
+
+    type Outgoing =
+      | { type: "description"; description: RTCSessionDescriptionInit }
+      | { type: "candidate"; candidate: RTCIceCandidateInit }
+
+    const send = (to: string, data: Outgoing) => {
+      channel?.send({
+        type: "broadcast",
+        event: "webrtc-signal",
+        payload: { from: myId, to, ...data },
+      })
+    }
+
+    const getPeer = (peerId: string): Peer => {
+      const existing = peers.get(peerId)
+      if (existing) return existing
+
+      const pc = new RTCPeerConnection({ iceServers })
+      const peer: Peer = { pc, makingOffer: false, ignoreOffer: false, settingAnswer: false }
+      peers.set(peerId, peer)
+
+      pc.ontrack = ({ track, streams: [remote] }) => {
+        const stream = remote ?? new MediaStream([track])
+        setStreams((prev) => ({ ...prev, [peerId]: stream }))
+      }
+
+      pc.onicecandidate = ({ candidate }) => {
+        if (candidate) send(peerId, { type: "candidate", candidate: candidate.toJSON() })
+      }
+
+      pc.onnegotiationneeded = async () => {
+        try {
+          peer.makingOffer = true
+          await pc.setLocalDescription()
+          send(peerId, { type: "description", description: pc.localDescription!.toJSON() })
+        } catch (err) {
+          console.error("Error en negociación:", err)
+        } finally {
+          peer.makingOffer = false
+        }
+      }
+
+      pc.onconnectionstatechange = () => {
+        console.log("Conexión con", peerId, pc.connectionState)
+        setStates((prev) => ({ ...prev, [peerId]: pc.connectionState }))
+        if (pc.connectionState === "failed") pc.restartIce()
+      }
+
+      localStream?.getTracks().forEach((t) => pc.addTrack(t, localStream!))
+      return peer
+    }
+
+    const removePeer = (peerId: string) => {
+      peers.get(peerId)?.pc.close()
+      peers.delete(peerId)
+      setStreams((prev) => {
+        const next = { ...prev }
+        delete next[peerId]
+        return next
+      })
+      setStates((prev) => {
+        const next = { ...prev }
+        delete next[peerId]
+        return next
+      })
+    }
+
+    // Patrón "perfect negotiation"
+    const handleSignal = async (msg: SignalPayload) => {
+      if (!active || msg.to !== myId) return
+      const peer = getPeer(msg.from)
+      const { pc } = peer
+
+      try {
+        if (msg.type === "description") {
+          const { description } = msg
+          const readyForOffer =
+            !peer.makingOffer && (pc.signalingState === "stable" || peer.settingAnswer)
+          const collision = description.type === "offer" && !readyForOffer
+          const polite = myId > msg.from
+
+          // Solo el par "no cortés" ignora una oferta, y solo si hay colisión
+          peer.ignoreOffer = !polite && collision
+          if (peer.ignoreOffer) return
+
+          peer.settingAnswer = description.type === "answer"
+          await pc.setRemoteDescription(description)
+          peer.settingAnswer = false
+
+          if (description.type === "offer") {
+            await pc.setLocalDescription()
+            send(msg.from, { type: "description", description: pc.localDescription!.toJSON() })
+          }
+        } else {
+          try {
+            await pc.addIceCandidate(msg.candidate)
+          } catch (err) {
+            if (!peer.ignoreOffer) throw err
+          }
+        }
+      } catch (err) {
+        console.error("Error manejando señal de", msg.from, err)
+      }
+    }
 
     const setup = async () => {
       try {
         setConnectionStatus("Solicitando micrófono...")
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        if (!isMounted) return
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          },
+        })
+        if (!active) {
+          stream.getTracks().forEach((t) => t.stop())
+          return
+        }
+        localStream = stream
         localStreamRef.current = stream
 
         setConnectionStatus("Conectando a la sala...")
-        const channel = supabase.channel(`jam_room_${roomId}`, {
-          config: { presence: { key: user.id } }
+        const ch = supabase.channel(`jam_room_${roomId}`, {
+          config: { presence: { key: myId } },
         })
-        channelRef.current = channel
+        channel = ch
 
-        channel
-          .on('presence', { event: 'sync' }, () => {
-            if (!isMounted) return
-            const state = channel.presenceState()
-            const otherPeers: Record<string, any> = {}
-            Object.keys(state).forEach(key => {
-              if (key !== user.id) otherPeers[key] = state[key][0] || {}
-            })
-            setPeers(otherPeers)
-            Object.keys(otherPeers).forEach(peerId => getOrCreatePeerConnection(peerId))
-          })
-          .on('presence', { event: 'leave' }, ({ key }) => {
-            if (peerConnections.current[key]) {
-              peerConnections.current[key].close()
-              delete peerConnections.current[key]
-            }
-            setPeers(prev => {
-              const next = { ...prev }
-              delete next[key]
-              return next
-            })
-          })
-          .on('broadcast', { event: 'webrtc-signal' }, ({ payload }) => {
+        ch.on("presence", { event: "sync" }, () => {
+          if (!active) return
+          const others = Object.keys(ch.presenceState()).filter((id) => id !== myId)
+          Array.from(peers.keys())
+            .filter((id) => !others.includes(id))
+            .forEach(removePeer)
+          others.forEach(getPeer)
+          setPeerIds(others)
+        })
+          .on("broadcast", { event: "webrtc-signal" }, ({ payload }) => {
             handleSignal(payload as SignalPayload)
           })
           .subscribe(async (status) => {
-            if (status === 'SUBSCRIBED' && isMounted) {
+            if (!active) return
+            if (status === "SUBSCRIBED") {
               setConnectionStatus("En la sala")
-              await channel.track({ instrument: "Músico", online_at: new Date().toISOString() })
+              await ch.track({ online_at: new Date().toISOString() })
+            } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+              setConnectionStatus("Error de conexión con la sala")
             }
           })
-
-      } catch (err: any) {
+      } catch (err) {
         console.error("Error en setup:", err)
-        setError(err.message || "Error al acceder al micrófono o conectar")
+        if (!active) return
+        setError(err instanceof Error ? err.message : "Error al acceder al micrófono o conectar")
         setConnectionStatus("Error")
       }
     }
@@ -193,26 +236,39 @@ export default function JamRoomPage() {
     setup()
 
     return () => {
-      isMounted = false
-      localStreamRef.current?.getTracks().forEach(t => t.stop())
-      if (channelRef.current) supabase.removeChannel(channelRef.current)
-      Object.values(peerConnections.current).forEach(pc => pc.close())
-      peerConnections.current = {}
+      active = false
+      localStream?.getTracks().forEach((t) => t.stop())
+      localStreamRef.current = null
+      peers.forEach(({ pc }) => pc.close())
+      peers.clear()
+      if (channel) supabase.removeChannel(channel)
     }
-  }, [user, authLoading, roomId, router, getOrCreatePeerConnection, handleSignal])
+  }, [userId, authLoading, roomId, router])
 
   const toggleMute = () => {
-    if (localStreamRef.current) {
-      const audioTrack = localStreamRef.current.getAudioTracks()[0]
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled
-        setIsMuted(!audioTrack.enabled)
-      }
-    }
+    const track = localStreamRef.current?.getAudioTracks()[0]
+    if (!track) return
+    track.enabled = !track.enabled
+    setIsMuted(!track.enabled)
+  }
+
+  const enableAudio = () => {
+    document
+      .querySelectorAll<HTMLAudioElement>("audio[data-remote]")
+      .forEach((el) => el.play().catch((e) => console.warn(e)))
   }
 
   if (authLoading) return <div style={{ padding: 30 }}>Cargando...</div>
   if (!user) return null
+
+  const button = {
+    padding: "12px 24px",
+    color: "white",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontSize: 16,
+  }
 
   return (
     <div style={{ padding: 30, fontFamily: "Arial", maxWidth: 800, margin: "0 auto" }}>
@@ -223,8 +279,8 @@ export default function JamRoomPage() {
 
       <div style={{ background: "#f0f0f0", padding: 15, borderRadius: 8, marginTop: 20 }}>
         <p><strong>Estado:</strong> {connectionStatus}</p>
-        <p><strong>Músicos conectados:</strong> {Object.keys(peers).length + 1} (tú + {Object.keys(peers).length})</p>
-        <p><strong>Audio remoto:</strong> {ontrackFired ? "✅ Recibido" : "⏳ Esperando audio"}</p>
+        <p><strong>Músicos conectados:</strong> {peerIds.length + 1} (tú + {peerIds.length})</p>
+        <p>🎧 Usa auriculares para evitar acoples.</p>
         {error && <p style={{ color: "red" }}>Error: {error}</p>}
       </div>
 
@@ -232,59 +288,25 @@ export default function JamRoomPage() {
         <h3>Participantes:</h3>
         <ul>
           <li>🎤 Tú {isMuted && "(silenciado)"}</li>
-          {Object.entries(peers).map(([id, info]) => (
-            <li key={id}>🎵 {info.instrument || "Músico"} (ID: {id.slice(0, 8)}...)</li>
+          {peerIds.map((id) => (
+            <li key={id}>
+              🎵 Músico ({id.slice(0, 8)}) · conexión: {states[id] ?? "new"} · audio:{" "}
+              {streams[id] ? "✅" : "⏳"}
+            </li>
           ))}
         </ul>
       </div>
 
-      <audio
-        ref={remoteAudioRef}
-        playsInline
-        controls={false}
-        style={{ height: 0, width: 0, opacity: 0, position: "absolute" }}
-      />
+      {Object.entries(streams).map(([id, stream]) => (
+        <RemoteAudio key={id} stream={stream} />
+      ))}
 
-      {!audioReady && (
-        <div style={{ marginTop: 20, padding: 15, background: "#fff3cd", borderRadius: 8 }}>
-          <p>🔊 En móvil el navegador bloquea el audio hasta que tocas este botón:</p>
-          <button
-            onClick={() => {
-              const audioEl = remoteAudioRef.current
-              if (audioEl) {
-                audioEl.play().catch(() => {})
-              }
-              setAudioReady(true)
-            }}
-            style={{
-              padding: "10px 20px",
-              background: "#2b8a3e",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontSize: 16,
-            }}
-          >
-            🔊 Autorizar reproducción de audio
-          </button>
-        </div>
-      )}
-
-      <div style={{ marginTop: 30 }}>
-        <button
-          onClick={toggleMute}
-          style={{
-            padding: "12px 24px",
-            background: isMuted ? "#dc3545" : "#28a745",
-            color: "white",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-            fontSize: 16,
-          }}
-        >
+      <div style={{ marginTop: 30, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <button onClick={toggleMute} style={{ ...button, background: isMuted ? "#dc3545" : "#28a745" }}>
           {isMuted ? "🔇 Activar micrófono" : "🎤 Silenciar"}
+        </button>
+        <button onClick={enableAudio} style={{ ...button, background: "#2b8a3e" }}>
+          🔊 ¿No oyes nada? Activar audio
         </button>
       </div>
     </div>
