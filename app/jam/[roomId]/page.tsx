@@ -46,6 +46,8 @@ export default function JamRoomPage() {
     }
 
     pc.ontrack = (event) => {
+      // En iOS, NO usar Web Audio API. Asignar directamente al <audio>.
+      // No llamar a play() aquí (no está en gesto de usuario).
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0]
       }
@@ -221,14 +223,21 @@ export default function JamRoomPage() {
         </ul>
       </div>
 
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
+      {/* Elemento de audio remoto: playsInline es obligatorio en iOS */}
+      <audio ref={remoteAudioRef} playsInline style={{ display: "none" }} />
 
       {!audioReady && (
         <div style={{ marginTop: 20, padding: 15, background: "#fff3cd", borderRadius: 8 }}>
-          <p>🔊 El navegador ha bloqueado el audio. Haz clic para escuchar a los demás músicos:</p>
+          <p>🔊 En móvil (especialmente iOS) el navegador bloquea el audio hasta que tocas este botón:</p>
           <button
             onClick={() => {
-              remoteAudioRef.current?.play().catch(e => console.error("Error al reproducir:", e))
+              // CRÍTICO: play() síncrono, sin await antes, dentro del gesto del usuario
+              const audioEl = remoteAudioRef.current
+              if (audioEl) {
+                audioEl.play().catch(() => {
+                  // Si aún no hay stream, el error es normal; la autorización ya quedó concedida
+                })
+              }
               setAudioReady(true)
             }}
             style={{
@@ -241,7 +250,7 @@ export default function JamRoomPage() {
               fontSize: 16,
             }}
           >
-            Habilitar audio
+            🔊 Autorizar reproducción de audio
           </button>
         </div>
       )}
