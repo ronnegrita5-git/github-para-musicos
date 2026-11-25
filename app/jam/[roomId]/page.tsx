@@ -21,6 +21,7 @@ export default function JamRoomPage() {
   const [connectionStatus, setConnectionStatus] = useState<string>("Iniciando...")
   const [error, setError] = useState<string | null>(null)
   const [audioReady, setAudioReady] = useState(false)
+  const [ontrackFired, setOntrackFired] = useState(false)
 
   const localStreamRef = useRef<MediaStream | null>(null)
   const peerConnections = useRef<Record<string, RTCPeerConnection>>({})
@@ -46,10 +47,11 @@ export default function JamRoomPage() {
     }
 
     pc.ontrack = (event) => {
-      // En iOS, NO usar Web Audio API. Asignar directamente al <audio>.
-      // No llamar a play() aquí (no está en gesto de usuario).
+      console.log("ontrack fired, streams:", event.streams)
+      setOntrackFired(true)
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0]
+        remoteAudioRef.current.play().catch(e => console.error("play failed:", e))
       }
     }
 
@@ -210,6 +212,7 @@ export default function JamRoomPage() {
       <div style={{ background: "#f0f0f0", padding: 15, borderRadius: 8, marginTop: 20 }}>
         <p><strong>Estado:</strong> {connectionStatus}</p>
         <p><strong>Músicos conectados:</strong> {Object.keys(peers).length + 1} (tú + {Object.keys(peers).length})</p>
+        <p><strong>Audio remoto:</strong> {ontrackFired ? "✅ Recibido" : "⏳ Esperando audio"}</p>
         {error && <p style={{ color: "red" }}>Error: {error}</p>}
       </div>
 
@@ -223,20 +226,22 @@ export default function JamRoomPage() {
         </ul>
       </div>
 
-      {/* Elemento de audio remoto: playsInline es obligatorio en iOS */}
-      <audio ref={remoteAudioRef} playsInline style={{ display: "none" }} />
+      {/* Elemento de audio remoto: playsInline obligatorio en iOS, oculto pero en el árbol */}
+      <audio
+        ref={remoteAudioRef}
+        playsInline
+        controls={false}
+        style={{ height: 0, width: 0, opacity: 0, position: "absolute" }}
+      />
 
       {!audioReady && (
         <div style={{ marginTop: 20, padding: 15, background: "#fff3cd", borderRadius: 8 }}>
           <p>🔊 En móvil (especialmente iOS) el navegador bloquea el audio hasta que tocas este botón:</p>
           <button
             onClick={() => {
-              // CRÍTICO: play() síncrono, sin await antes, dentro del gesto del usuario
               const audioEl = remoteAudioRef.current
               if (audioEl) {
-                audioEl.play().catch(() => {
-                  // Si aún no hay stream, el error es normal; la autorización ya quedó concedida
-                })
+                audioEl.play().catch(() => {})
               }
               setAudioReady(true)
             }}
