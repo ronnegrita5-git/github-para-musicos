@@ -31,7 +31,19 @@ export default function JamRoomPage() {
   const remoteAudioRef = useRef<HTMLAudioElement>(null)
 
   const rtcConfig: RTCConfiguration = {
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      }
+    ]
   }
 
   const getOrCreatePeerConnection = useCallback((peerId: string): RTCPeerConnection => {
@@ -226,7 +238,6 @@ export default function JamRoomPage() {
         </ul>
       </div>
 
-      {/* Elemento de audio remoto: playsInline obligatorio en iOS, oculto pero en el árbol */}
       <audio
         ref={remoteAudioRef}
         playsInline
@@ -236,7 +247,7 @@ export default function JamRoomPage() {
 
       {!audioReady && (
         <div style={{ marginTop: 20, padding: 15, background: "#fff3cd", borderRadius: 8 }}>
-          <p>🔊 En móvil (especialmente iOS) el navegador bloquea el audio hasta que tocas este botón:</p>
+          <p>🔊 En móvil el navegador bloquea el audio hasta que tocas este botón:</p>
           <button
             onClick={() => {
               const audioEl = remoteAudioRef.current
